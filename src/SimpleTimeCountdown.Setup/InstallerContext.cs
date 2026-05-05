@@ -10,6 +10,8 @@ internal static class InstallerContext
     private static long? _payloadInstalledSize;
     private const string LegacyProductName = "Time Countdown";
     private const string AppExecutableName = "TimeCountdown.exe";
+    private const string AppAssetsDirectoryName = "Assets";
+    private const string AppIconFileName = "AppIcon.ico";
     private const string InstallerExecutableName = "Simple Time Countdown Setup.exe";
     private const string InstallerDirectoryName = "Installer";
     public const string InstallMarkerFileName = ".timecountdown-install";
@@ -88,7 +90,7 @@ internal static class InstallerContext
 
     public static string InstallerExecutablePath => Path.Combine(InstallerDirectory, InstallerExecutableName);
 
-    public static string AppShortcutIconPath => AppExecutablePath;
+    public static string AppShortcutIconPath => Path.Combine(InstallRoot, AppAssetsDirectoryName, AppIconFileName);
 
     public static string InstallerShortcutIconPath => InstallerExecutablePath;
 

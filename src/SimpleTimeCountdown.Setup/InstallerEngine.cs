@@ -328,7 +328,7 @@ internal static class InstallerEngine
         dynamic shortcut = shell.CreateShortcut(shortcutPath);
         shortcut.TargetPath = targetPath;
         shortcut.WorkingDirectory = workingDirectory;
-        shortcut.IconLocation = iconPath;
+        shortcut.IconLocation = $"{iconPath},0";
         if (!string.IsNullOrWhiteSpace(arguments))
         {
             shortcut.Arguments = arguments;
