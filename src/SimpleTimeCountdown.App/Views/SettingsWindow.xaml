@@ -1,0 +1,322 @@
+<Window x:Class="TimeCountdown.Views.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="{Binding [Window.Settings.Title], Source={StaticResource Loc}}"
+        Width="600"
+        SizeToContent="Height"
+        MinWidth="540"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        FontFamily="{StaticResource SerifFont}"
+        Foreground="{StaticResource InkBrush}">
+
+    <Window.Resources>
+        <Style x:Key="SectionHeader" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="{StaticResource SerifFont}" />
+            <Setter Property="FontStyle" Value="Italic" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="HintText" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="{StaticResource SerifFont}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{StaticResource InkSoftBrush}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+
+        <!-- Reusable Holmes-style section ornament template -->
+        <Style x:Key="SectionOrnament" TargetType="StackPanel">
+            <Setter Property="Orientation" Value="Horizontal" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,4,0,0" />
+        </Style>
+    </Window.Resources>
+
+    <Border Margin="26,20,26,30"
+            Background="{StaticResource PaperBrush}"
+            BorderBrush="{StaticResource PaperEdgeBrush}"
+            BorderThickness="1"
+            MouseLeftButtonDown="WindowSurface_OnMouseLeftButtonDown">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="28" ShadowDepth="7" Direction="300" Opacity="0.26" Color="#3C2814" />
+        </Border.Effect>
+
+        <Grid Margin="44,32,44,32">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- Title block -->
+            <StackPanel Grid.Row="0">
+                <TextBlock HorizontalAlignment="Center"
+                           FontFamily="{StaticResource SerifFont}"
+                           FontWeight="SemiBold"
+                           FontSize="26"
+                           Foreground="{StaticResource InkBrush}"
+                           Text="{Binding [Settings.Heading], Source={StaticResource Loc}}" />
+                <StackPanel Orientation="Horizontal"
+                            HorizontalAlignment="Center"
+                            Margin="0,8,0,0">
+                    <Border Width="40" Height="1" Background="{StaticResource RuleBrush}" VerticalAlignment="Center" />
+                    <Path Margin="6,0" Width="6" Height="6" Stretch="Uniform"
+                          Data="M 0 -4 L 4 0 L 0 4 L -4 0 Z" Fill="{StaticResource RuleBrush}" />
+                    <Border Width="40" Height="1" Background="{StaticResource RuleBrush}" VerticalAlignment="Center" />
+                </StackPanel>
+                <TextBlock HorizontalAlignment="Center"
+                           Margin="0,12,0,0"
+                           FontSize="13"
+                           Foreground="{StaticResource InkSoftBrush}"
+                           Text="{Binding [Settings.Subtitle], Source={StaticResource Loc}}"
+                           TextWrapping="Wrap"
+                           TextAlignment="Center" />
+            </StackPanel>
+
+            <!-- I · Display -->
+            <StackPanel Grid.Row="1" Margin="0,28,0,0">
+                <TextBlock Style="{StaticResource SectionHeader}"
+                           Text="{Binding [Settings.SectionDisplay], Source={StaticResource Loc}}" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,4,0,0">
+                    <Border Width="80" Height="0.8" Background="{StaticResource RuleBrush}" VerticalAlignment="Center" />
+                    <Path Margin="6,0" Width="5" Height="5" Stretch="Uniform"
+                          Data="M 0 -4 L 4 0 L 0 4 L -4 0 Z" Fill="{StaticResource RuleBrush}" />
+                    <Border Width="80" Height="0.8" Background="{StaticResource RuleBrush}" VerticalAlignment="Center" />
+                </StackPanel>
+
+                <CheckBox Margin="0,16,0,0"
+                          Style="{StaticResource ParchmentCheckBox}"
+                          Content="{Binding [Settings.AlwaysOnTop], Source={StaticResource Loc}}"
+                          IsChecked="{Binding AlwaysOnTop}" />
+                <CheckBox Margin="0,10,0,0"
+                          Style="{StaticResource ParchmentCheckBox}"
+                          Content="{Binding [Settings.DesktopLayer], Source={StaticResource Loc}}"
+                          IsChecked="{Binding DesktopLayerEnabled}" />
+                <TextBlock Margin="22,4,0,0"
+                           Style="{StaticResource HintText}"
+                           Text="{Binding [Settings.DesktopLayerHint], Source={StaticResource Loc}}" />
+
+                <Grid Margin="0,18,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Style="{StaticResource SmallCapsLabel}" Text="{Binding [Settings.PanelOpacity], Source={StaticResource Loc}}" />
+                        <Slider Margin="0,8,16,0"
+                                Style="{StaticResource ParchmentSlider}"
+                                Minimum="0.72"
+                                Maximum="1.0"
+                                TickFrequency="0.04"
+                                Value="{Binding PanelOpacity}" />
+                    </StackPanel>
+                    <TextBlock Grid.Column="1"
+                               VerticalAlignment="Bottom"
+                               FontFamily="{StaticResource SerifFont}"
+                               FontWeight="SemiBold"
+                               FontSize="14"
+                               Foreground="{StaticResource InkBrush}"
+                               Text="{Binding PanelOpacity, StringFormat={}{0:P0}}" />
+                </Grid>
+            </StackPanel>
+
+            <!-- II · Behaviour -->
+            <StackPanel Grid.Row="2" Margin="0,28,0,0">
+                <TextBlock Style="{StaticResource SectionHeader}"
+                           Text="{Binding [Settings.SectionBehavior], Source={StaticResource Loc}}" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,4,0,0">
+                    <Border Width="80" Height="0.8" Background="{StaticResource RuleBrush}" VerticalAlignment="Center" />
+                    <Path Margin="6,0" Width="5" Height="5" Stretch="Uniform"
+                          Data="M 0 -4 L 4 0 L 0 4 L -4 0 Z" Fill="{StaticResource RuleBrush}" />
+                    <Border Width="80" Height="0.8" Background="{StaticResource RuleBrush}" VerticalAlignment="Center" />
+                </StackPanel>
+
+                <StackPanel Margin="0,16,0,0" HorizontalAlignment="Center">
+                    <TextBlock Style="{StaticResource SmallCapsLabel}"
+                               HorizontalAlignment="Center"
+                               Text="{Binding [Settings.Language], Source={StaticResource Loc}}" />
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,6,0,0">
+                        <Button Content="English"
+                                FontSize="15"
+                                Click="LangEn_Click">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource PencilButton}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SelectedLanguageCode}" Value="en">
+                                            <Setter Property="Foreground" Value="{StaticResource StatusUrgentBrush}" />
+                                            <Setter Property="FontWeight" Value="Bold" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <TextBlock VerticalAlignment="Center"
+                                   Margin="14,0"
+                                   FontSize="14"
+                                   Foreground="{StaticResource RuleBrush}"
+                                   Text="|" />
+                        <Button Content="中文"
+                                FontSize="15"
+                                Click="LangZh_Click">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource PencilButton}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SelectedLanguageCode}" Value="zh-CN">
+                                            <Setter Property="Foreground" Value="{StaticResource StatusUrgentBrush}" />
+                                            <Setter Property="FontWeight" Value="Bold" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                    </StackPanel>
+                </StackPanel>
+
+                <CheckBox Margin="0,16,0,0"
+                          Style="{StaticResource ParchmentCheckBox}"
+                          Content="{Binding [Settings.Startup], Source={StaticResource Loc}}"
+                          IsChecked="{Binding LaunchAtStartup}" />
+                <CheckBox Margin="0,10,0,0"
+                          Style="{StaticResource ParchmentCheckBox}"
+                          Content="{Binding [Settings.HideToTray], Source={StaticResource Loc}}"
+                          IsChecked="{Binding HideOnCloseToTray}" />
+
+                <Grid Margin="0,18,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="14" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Style="{StaticResource SmallCapsLabel}" Text="{Binding [Settings.DefaultReminder], Source={StaticResource Loc}}" />
+                        <ComboBox Margin="0,4,0,0"
+                                  Style="{StaticResource ParchmentComboBox}"
+                                  DisplayMemberPath="Label"
+                                  SelectedValuePath="Minutes"
+                                  ItemsSource="{Binding ReminderOptions}"
+                                  SelectedValue="{Binding DefaultReminderMinutesBefore}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Style="{StaticResource SmallCapsLabel}" Text="{Binding [Settings.DefaultTimeZone], Source={StaticResource Loc}}" />
+                        <ComboBox Margin="0,4,0,0"
+                                  Style="{StaticResource ParchmentComboBox}"
+                                  DisplayMemberPath="DisplayName"
+                                  SelectedValuePath="Id"
+                                  ItemsSource="{Binding TimeZoneOptions}"
+                                  SelectedValue="{Binding DefaultTimeZoneId}" />
+                    </StackPanel>
+                </Grid>
+            </StackPanel>
+
+            <!-- III · Thresholds -->
+            <StackPanel Grid.Row="3" Margin="0,28,0,0">
+                <TextBlock Style="{StaticResource SectionHeader}"
+                           Text="{Binding [Settings.SectionThresholds], Source={StaticResource Loc}}" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,4,0,0">
+                    <Border Width="80" Height="0.8" Background="{StaticResource RuleBrush}" VerticalAlignment="Center" />
+                    <Path Margin="6,0" Width="5" Height="5" Stretch="Uniform"
+                          Data="M 0 -4 L 4 0 L 0 4 L -4 0 Z" Fill="{StaticResource RuleBrush}" />
+                    <Border Width="80" Height="0.8" Background="{StaticResource RuleBrush}" VerticalAlignment="Center" />
+                </StackPanel>
+                <TextBlock Margin="0,12,0,0"
+                           Style="{StaticResource HintText}"
+                           TextAlignment="Center"
+                           Text="{Binding [Settings.StatusThresholdHint], Source={StaticResource Loc}}" />
+
+                <Grid Margin="0,12,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="200" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="50" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Row="0" VerticalAlignment="Center"
+                               FontSize="13" Foreground="{StaticResource InkBrush}"
+                               Text="{Binding [Settings.Threshold.Today], Source={StaticResource Loc}}" />
+                    <Slider Grid.Row="0" Grid.Column="1"
+                            Margin="10,0,10,0"
+                            Style="{StaticResource ParchmentSlider}"
+                            Minimum="-30" Maximum="60"
+                            TickFrequency="1" IsSnapToTickEnabled="True"
+                            Value="{Binding TodayThresholdDays}" />
+                    <TextBlock Grid.Row="0" Grid.Column="2"
+                               HorizontalAlignment="Right" VerticalAlignment="Center"
+                               FontFamily="{StaticResource SerifFont}" FontWeight="SemiBold"
+                               Text="{Binding TodayThresholdDays}" />
+
+                    <TextBlock Grid.Row="1" Margin="0,12,0,0" VerticalAlignment="Center"
+                               FontSize="13" Foreground="{StaticResource InkBrush}"
+                               Text="{Binding [Settings.Threshold.Soon], Source={StaticResource Loc}}" />
+                    <Slider Grid.Row="1" Grid.Column="1"
+                            Margin="10,12,10,0"
+                            Style="{StaticResource ParchmentSlider}"
+                            Minimum="-30" Maximum="120"
+                            TickFrequency="1" IsSnapToTickEnabled="True"
+                            Value="{Binding SoonThresholdDays}" />
+                    <TextBlock Grid.Row="1" Grid.Column="2"
+                               Margin="0,12,0,0"
+                               HorizontalAlignment="Right" VerticalAlignment="Center"
+                               FontFamily="{StaticResource SerifFont}" FontWeight="SemiBold"
+                               Text="{Binding SoonThresholdDays}" />
+
+                    <TextBlock Grid.Row="2" Margin="0,12,0,0" VerticalAlignment="Center"
+                               FontSize="13" Foreground="{StaticResource InkBrush}"
+                               Text="{Binding [Settings.Threshold.Safe], Source={StaticResource Loc}}" />
+                    <Slider Grid.Row="2" Grid.Column="1"
+                            Margin="10,12,10,0"
+                            Style="{StaticResource ParchmentSlider}"
+                            Minimum="-30" Maximum="180"
+                            TickFrequency="1" IsSnapToTickEnabled="True"
+                            Value="{Binding SafeThresholdDays}" />
+                    <TextBlock Grid.Row="2" Grid.Column="2"
+                               Margin="0,12,0,0"
+                               HorizontalAlignment="Right" VerticalAlignment="Center"
+                               FontFamily="{StaticResource SerifFont}" FontWeight="SemiBold"
+                               Text="{Binding SafeThresholdDays}" />
+                </Grid>
+            </StackPanel>
+
+            <!-- IV · Placement -->
+            <StackPanel Grid.Row="4" Margin="0,28,0,0">
+                <TextBlock Style="{StaticResource SectionHeader}"
+                           Text="{Binding [Settings.SectionPlacement], Source={StaticResource Loc}}" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,4,0,0">
+                    <Border Width="80" Height="0.8" Background="{StaticResource RuleBrush}" VerticalAlignment="Center" />
+                    <Path Margin="6,0" Width="5" Height="5" Stretch="Uniform"
+                          Data="M 0 -4 L 4 0 L 0 4 L -4 0 Z" Fill="{StaticResource RuleBrush}" />
+                    <Border Width="80" Height="0.8" Background="{StaticResource RuleBrush}" VerticalAlignment="Center" />
+                </StackPanel>
+                <TextBlock Margin="0,12,0,0"
+                           Style="{StaticResource HintText}"
+                           TextAlignment="Center"
+                           Text="{Binding [Settings.PlacementHint], Source={StaticResource Loc}}" />
+                <Button HorizontalAlignment="Center"
+                        Margin="0,14,0,0"
+                        Style="{StaticResource PencilButton}"
+                        Click="ResetPlacement_Click"
+                        Content="{Binding [Settings.ResetPlacement], Source={StaticResource Loc}}" />
+            </StackPanel>
+
+            <Grid Grid.Row="5" Margin="0,28,0,0">
+                <Button HorizontalAlignment="Right"
+                        Style="{StaticResource PencilButton}"
+                        Click="Close_Click"
+                        Content="{Binding [Common.Leave], Source={StaticResource Loc}}"
+                        IsDefault="True" />
+            </Grid>
+        </Grid>
+    </Border>
+</Window>

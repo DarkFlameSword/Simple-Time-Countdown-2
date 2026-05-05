@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>TimeCountdown.Setup</AssemblyName>
+    <RootNamespace>TimeCountdown.Setup</RootNamespace>
+    <ApplicationIcon>..\SimpleTimeCountdown.App\Assets\AppIcon.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Company>Simple Time Countdown</Company>
+    <Product>Simple Time Countdown</Product>
+    <Title>Simple Time Countdown Setup</Title>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\artifacts\installer-payload\TimeCountdown-portable.zip" Link="Payload\TimeCountdown-portable.zip" Condition="Exists('..\..\artifacts\installer-payload\TimeCountdown-portable.zip')" />
+    <EmbeddedResource Include="..\SimpleTimeCountdown.App\Assets\AppIcon-256.png" Link="Assets\AppIcon-256.png" />
+  </ItemGroup>
+</Project>
