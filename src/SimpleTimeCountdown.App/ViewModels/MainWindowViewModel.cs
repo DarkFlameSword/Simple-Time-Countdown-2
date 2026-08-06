@@ -15,11 +15,9 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly DispatcherTimer _timer;
     private readonly DispatcherTimer _windowBoundsPersistTimer;
     private readonly LocalizationService _localization = LocalizationService.Instance;
-    private IReadOnlyList<FilterOption> _filterOptions = [];
     private IReadOnlyList<ReminderOption> _reminderOptions = [];
     private IReadOnlyList<TimeZoneOption> _timeZoneOptions = [];
     private string _searchText = string.Empty;
-    private string _selectedFilter = "All";
     private bool _showArchivedOnly;
     private bool _alwaysOnTop;
     private bool _launchAtStartup;
@@ -48,7 +46,6 @@ public sealed class MainWindowViewModel : ObservableObject
         _localization.SetLanguage(initialLanguage);
         _selectedLanguageCode = _localization.CurrentLanguageCode;
 
-        _filterOptions = BuildFilterOptions();
         _reminderOptions = OptionCatalog.GetReminderOptions();
         _timeZoneOptions = OptionCatalog.GetTimeZoneOptions(_localization.CurrentLanguageCode);
         _languageOptions = BuildLanguageOptions();
@@ -64,7 +61,6 @@ public sealed class MainWindowViewModel : ObservableObject
 
         _alwaysOnTop = state.Settings.AlwaysOnTop;
         _panelOpacity = Math.Clamp(state.Settings.PanelOpacity, 0.72, 1.00);
-        _selectedFilter = NormalizeFilterKey(state.Settings.SelectedFilter);
         _showArchivedOnly = state.Settings.ShowArchivedOnly;
         _launchAtStartup = _autostartService.IsEnabled();
         _hideOnCloseToTray = state.Settings.HideOnCloseToTray;
@@ -110,20 +106,6 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICollectionView ItemsView { get; }
 
-    public IReadOnlyList<FilterOption> FilterOptions
-    {
-        get => _filterOptions;
-        private set
-        {
-            if (!SetProperty(ref _filterOptions, value))
-            {
-                return;
-            }
-
-            OnPropertyChanged(nameof(SelectedFilterOption));
-        }
-    }
-
     public IReadOnlyList<ReminderOption> ReminderOptions
     {
         get => _reminderOptions;
@@ -158,24 +140,6 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
-    public string SelectedFilter
-    {
-        get => _selectedFilter;
-        set
-        {
-            value = NormalizeFilterKey(value);
-
-            if (!SetProperty(ref _selectedFilter, value))
-            {
-                return;
-            }
-
-            _state.Settings.SelectedFilter = value;
-            OnPropertyChanged(nameof(SelectedFilterOption));
-            RefreshCountdowns(forcePersist: true);
-        }
-    }
-
     public bool ShowArchivedOnly
     {
         get => _showArchivedOnly;
@@ -204,12 +168,6 @@ public sealed class MainWindowViewModel : ObservableObject
                 ? (zh ? "返回主列表" : "Back to main list")
                 : (zh ? "仅显示已归档卡片" : "Show archived cards only");
         }
-    }
-
-    public FilterOption? SelectedFilterOption
-    {
-        get => FilterOptions.FirstOrDefault(option => option.Key == SelectedFilter) ?? FilterOptions.FirstOrDefault();
-        set => SelectedFilter = value?.Key ?? "All";
     }
 
     public bool AlwaysOnTop
@@ -510,7 +468,6 @@ public sealed class MainWindowViewModel : ObservableObject
         _state.Settings.HideOnCloseToTray = HideOnCloseToTray;
         _state.Settings.DesktopLayerEnabled = DesktopLayerEnabled;
         _state.Settings.PanelOpacity = PanelOpacity;
-        _state.Settings.SelectedFilter = SelectedFilter;
         _state.Settings.ShowArchivedOnly = ShowArchivedOnly;
         _state.Settings.DefaultReminderMinutesBefore = DefaultReminderMinutesBefore;
         _state.Settings.DefaultTimeZoneId = DefaultTimeZoneId;
@@ -668,25 +625,6 @@ public sealed class MainWindowViewModel : ObservableObject
         return new CountdownThresholds(OverdueDays: 0, todayDays, soonDays, safeDays);
     }
 
-    private string NormalizeFilterKey(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return "All";
-        }
-
-        var byKey = FilterOptions.FirstOrDefault(option =>
-            string.Equals(option.Key, value, StringComparison.OrdinalIgnoreCase));
-        if (byKey is not null)
-        {
-            return byKey.Key;
-        }
-
-        var byLabel = FilterOptions.FirstOrDefault(option =>
-            string.Equals(option.Label, value, StringComparison.CurrentCultureIgnoreCase));
-        return byLabel?.Key ?? "All";
-    }
-
     private void SortCountdowns()
     {
         var ordered = Countdowns
@@ -715,15 +653,9 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         LanguageOptions = BuildLanguageOptions();
-        FilterOptions = BuildFilterOptions();
         ReminderOptions = OptionCatalog.GetReminderOptions();
         TimeZoneOptions = OptionCatalog.GetTimeZoneOptions(_localization.CurrentLanguageCode);
         OnPropertyChanged(nameof(ArchiveViewTooltipText));
-
-        if (!FilterOptions.Any(option => option.Key == SelectedFilter))
-        {
-            SelectedFilter = "All";
-        }
 
         if (!ReminderOptions.Any(option => option.Minutes == DefaultReminderMinutesBefore))
         {
@@ -731,18 +663,6 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         RefreshCountdowns(forcePersist: false);
-    }
-
-    private IReadOnlyList<FilterOption> BuildFilterOptions()
-    {
-        return
-        [
-            new FilterOption("All", _localization["Filter.All"]),
-            new FilterOption("Safe", _localization["Filter.Safe"]),
-            new FilterOption("Soon", _localization["Filter.Soon"]),
-            new FilterOption("Today", _localization["Filter.Today"]),
-            new FilterOption("Overdue", _localization["Filter.Overdue"])
-        ];
     }
 
     private IReadOnlyList<LanguageOption> BuildLanguageOptions()

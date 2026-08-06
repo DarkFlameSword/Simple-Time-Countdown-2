@@ -12,8 +12,6 @@ public sealed class AppSettings
 
     public double PanelOpacity { get; set; } = 0.96;
 
-    public string SelectedFilter { get; set; } = "All";
-
     public bool HideOverdueCards { get; set; }
 
     public bool ShowArchivedOnly { get; set; }
