@@ -4,214 +4,303 @@ using System.Reflection;
 
 namespace TimeCountdown.Setup;
 
+/// <summary>
+/// Classic setup wizard styled after mainstream Windows installers: a coloured sidebar with a
+/// step tracker, a page header, standard system controls, and a bottom command bar. The wizard is
+/// a thin shell over <see cref="InstallerEngine"/>; all file, registry, and shortcut work stays there.
+/// </summary>
 internal sealed class InstallerForm : Form
 {
-    // ============= Vellum palette =============
-    private static readonly Color VellumPaper = Color.FromArgb(0xED, 0xE3, 0xCE);
-    private static readonly Color VellumPaperEdge = Color.FromArgb(0xC9, 0xB9, 0x8E);
-    private static readonly Color VellumInk = Color.FromArgb(0x1F, 0x1A, 0x12);
-    private static readonly Color VellumInkSoft = Color.FromArgb(0x4A, 0x3A, 0x22);
-    private static readonly Color VellumGray = Color.FromArgb(0x6B, 0x5A, 0x3F);
-    private static readonly Color VellumGrayFaint = Color.FromArgb(0x8A, 0x76, 0x54);
-    private static readonly Color VellumOxblood = Color.FromArgb(0x7A, 0x2E, 0x2E);
-    private static readonly Color DarkLeather = Color.FromArgb(0x2A, 0x1E, 0x10);
-    private static readonly Color CreamOnLeather = Color.FromArgb(0xF0, 0xE6, 0xD2);
-    private static readonly Color CreamOnLeatherSoft = Color.FromArgb(0xC8, 0xB4, 0x90);
+    // ============= Palette (neutral, professional installer look) =============
+    private static readonly Color PageBack = Color.White;
+    private static readonly Color HeaderBack = Color.White;
+    private static readonly Color CommandBarBack = Color.FromArgb(0xF3, 0xF3, 0xF3);
+    private static readonly Color Separator = Color.FromArgb(0xE1, 0xDF, 0xDD);
+    private static readonly Color TextPrimary = Color.FromArgb(0x20, 0x20, 0x20);
+    private static readonly Color TextSecondary = Color.FromArgb(0x60, 0x5E, 0x5C);
+    private static readonly Color CardBack = Color.FromArgb(0xF7, 0xF7, 0xFA);
+    private static readonly Color SidebarTop = Color.FromArgb(0x22, 0x3A, 0x5C);
+    private static readonly Color SidebarBottom = Color.FromArgb(0x33, 0x5F, 0x91);
+    private static readonly Color SidebarText = Color.White;
+    private static readonly Color SidebarTextDim = Color.FromArgb(0xB6, 0xC6, 0xDC);
+    private static readonly Color Accent = Color.FromArgb(0x0F, 0x6C, 0xBD);
 
     // ============= Fonts =============
-    // Cambria handles Latin; the system falls back to an installed CJK face for Chinese glyphs.
-    private const string SerifFamily = "Cambria";
-    private const string CjkSerifFamily = "Microsoft YaHei UI";
-    private static readonly Font BigTitleFont = new(SerifFamily, 26F, FontStyle.Regular, GraphicsUnit.Point);
-    private static readonly Font BoxLabelFont = new(SerifFamily, 7.5F, FontStyle.Regular, GraphicsUnit.Point);
-    private static readonly Font BoxValueFont = new(SerifFamily, 10F, FontStyle.Regular, GraphicsUnit.Point);
-    private static readonly Font ArticleHeadingFont = new(CjkSerifFamily, 9.5F, FontStyle.Regular, GraphicsUnit.Point);
-    private static readonly Font ArticleBodyFont = new(CjkSerifFamily, 10F, FontStyle.Regular, GraphicsUnit.Point);
-    private static readonly Font MastBarTitleFont = new(SerifFamily, 10F, FontStyle.Regular, GraphicsUnit.Point);
-    private static readonly Font OrnamentFont = new(SerifFamily, 14F, FontStyle.Regular, GraphicsUnit.Point);
-    private static readonly Font StatusBigFont = new(CjkSerifFamily, 11F, FontStyle.Regular, GraphicsUnit.Point);
+    private const string UiFont = "Microsoft YaHei UI";
+    private static readonly Font TitleFont = new(UiFont, 15F, FontStyle.Regular, GraphicsUnit.Point);
+    private static readonly Font SubtitleFont = new(UiFont, 9F, FontStyle.Regular, GraphicsUnit.Point);
+    private static readonly Font BodyFont = new(UiFont, 9.5F, FontStyle.Regular, GraphicsUnit.Point);
+    private static readonly Font BodyStrongFont = new(UiFont, 10.5F, FontStyle.Bold, GraphicsUnit.Point);
+    private static readonly Font SidebarTitleFont = new(UiFont, 12F, FontStyle.Bold, GraphicsUnit.Point);
+    private static readonly Font SidebarSmallFont = new(UiFont, 8.5F, FontStyle.Regular, GraphicsUnit.Point);
+    private static readonly Font StepFont = new(UiFont, 9.5F, FontStyle.Regular, GraphicsUnit.Point);
+    private static readonly Font StepActiveFont = new(UiFont, 9.5F, FontStyle.Bold, GraphicsUnit.Point);
 
     private enum Stage { Welcome, Progress, Complete }
 
     private readonly bool _uninstallMode;
     private readonly Image? _brandImage;
+    private readonly string[] _stepLabels;
 
     // ============= Controls =============
-    private readonly Panel _topBar;
-    private readonly Panel _body;
-    private readonly Panel _footer;
-    private readonly Button _closeButton;
-    private readonly TableLayoutPanel _installPathRow;
-    private readonly TextBox _installPathTextBox;
-    private readonly VellumButton _installPathBrowseButton;
-    private readonly VellumCheckBox _launchCheckBox;
-    private readonly VellumCheckBox _removeDataCheckBox;
-    private readonly VellumProgressBar _progressBar;
-    private readonly FlowLayoutPanel _footerButtons;
-    private readonly VellumButton _primaryButton;
-    private readonly VellumButton _secondaryButton;
+    private readonly DoubleBufferedPanel _sidebar;
+    private readonly Panel _content;
+    private readonly Panel _header;
+    private readonly Panel _pageHost;
+    private readonly DoubleBufferedPanel _commandBar;
+    private readonly Label _titleLabel;
+    private readonly Label _subtitleLabel;
+
+    private readonly Panel _welcomePage;
+    private readonly Label _introLabel;
+    private readonly Panel _infoCard;
+    private readonly Label _versionValue;
+    private readonly Label _sizeValue;
+    private readonly Label _pathLabel;
+    private readonly TextBox _pathTextBox;
+    private readonly Button _browseButton;
+    private readonly CheckBox _launchCheckBox;
+    private readonly CheckBox _removeDataCheckBox;
+
+    private readonly Panel _progressPage;
+    private readonly Label _progressStatusLabel;
+    private readonly Label _progressDetailLabel;
+    private readonly ProgressBar _progressBar;
+
+    private readonly Panel _completePage;
+    private readonly Label _completeTitleLabel;
+    private readonly Label _completeBodyLabel;
+
+    private readonly AccentButton _primaryButton;
+    private readonly Button _cancelButton;
 
     private Stage _stage = Stage.Welcome;
     private bool _existingInstall;
-    private string _statusLine1 = string.Empty;
-    private string _statusLine2 = string.Empty;
 
     public InstallerForm(bool uninstallMode)
     {
         _uninstallMode = uninstallMode;
         _existingInstall = InstallerContext.IsInstalled;
         _brandImage = LoadBrandImage();
+        _stepLabels = uninstallMode
+            ? ["卸载选项", "正在卸载", "完成"]
+            : ["安装选项", "正在安装", "完成"];
 
-        BackColor = VellumPaper;
-        ClientSize = new Size(600, 400);
-        Font = new Font(SerifFamily, 10F, FontStyle.Regular, GraphicsUnit.Point);
-        FormBorderStyle = FormBorderStyle.None;
+        Font = new Font(UiFont, 9F, FontStyle.Regular, GraphicsUnit.Point);
+        BackColor = PageBack;
+        ClientSize = new Size(660, 460);
+        FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterScreen;
         MaximizeBox = false;
-        MinimizeBox = false;
-        MinimumSize = new Size(600, 400);
-        Text = $"{InstallerContext.ProductName} Setup";
-        Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath ?? string.Empty);
+        MinimizeBox = true;
+        ShowInTaskbar = true;
+        Text = uninstallMode
+            ? $"{InstallerContext.ProductName} 卸载"
+            : $"{InstallerContext.ProductName} 安装";
+        Icon = TryLoadFormIcon();
         DoubleBuffered = true;
 
-        _topBar = new BufferedPanel { Dock = DockStyle.Top, Height = 42, BackColor = DarkLeather };
-        _topBar.Paint += TopBarOnPaint;
+        // ---- Sidebar (step tracker) ----
+        _sidebar = new DoubleBufferedPanel { Dock = DockStyle.Left, Width = 200 };
+        _sidebar.Paint += SidebarOnPaint;
 
-        _closeButton = new Button
+        // ---- Command bar ----
+        _commandBar = new DoubleBufferedPanel { Dock = DockStyle.Bottom, Height = 58, BackColor = CommandBarBack };
+        _commandBar.Paint += CommandBarOnPaint;
+
+        _primaryButton = new AccentButton
         {
-            Text = "✕",
-            FlatStyle = FlatStyle.Flat,
-            ForeColor = CreamOnLeatherSoft,
-            BackColor = DarkLeather,
-            Font = new Font("Segoe UI", 11F, FontStyle.Regular),
-            Size = new Size(36, 28),
-            Anchor = AnchorStyles.Top | AnchorStyles.Right,
-            TabStop = false,
-            Cursor = Cursors.Hand
-        };
-        _closeButton.FlatAppearance.BorderSize = 0;
-        _closeButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(0x3A, 0x2A, 0x18);
-        _closeButton.Click += (_, _) => Close();
-        _topBar.Controls.Add(_closeButton);
-        _topBar.Resize += (_, _) =>
-            _closeButton.Location = new Point(_topBar.ClientSize.Width - _closeButton.Width - 6, 7);
-
-        _footer = new BufferedPanel { Dock = DockStyle.Bottom, Height = 68, BackColor = DarkLeather };
-        _footer.Paint += FooterOnPaint;
-
-        _primaryButton = new VellumButton
-        {
-            ButtonKind = VellumButtonKind.Primary,
-            Text = "Proceed",
-            Size = new Size(150, 40),
-            Margin = new Padding(8, 0, 0, 0)
+            Text = uninstallMode ? "卸载" : "安装",
+            Size = new Size(112, 34),
+            Anchor = AnchorStyles.Top | AnchorStyles.Right
         };
         _primaryButton.Click += OnPrimaryClick;
 
-        _secondaryButton = new VellumButton
+        _cancelButton = new Button
         {
-            ButtonKind = VellumButtonKind.Primary,
-            BackColor = DarkLeather,
-            Text = "Quit",
-            Size = new Size(100, 40),
-            Margin = new Padding(0, 0, 0, 0)
-        };
-        _secondaryButton.Click += OnSecondaryClick;
-
-        _footerButtons = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Right,
-            FlowDirection = FlowDirection.LeftToRight,
-            AutoSize = true,
-            WrapContents = false,
-            Padding = new Padding(0, 14, 18, 14),
-            BackColor = DarkLeather
-        };
-        _footerButtons.Controls.Add(_secondaryButton);
-        _footerButtons.Controls.Add(_primaryButton);
-        _footer.Controls.Add(_footerButtons);
-
-        _body = new BufferedPanel
-        {
-            Dock = DockStyle.Fill,
-            BackColor = VellumPaper,
-            Padding = new Padding(0)
-        };
-        _body.Paint += BodyOnPaint;
-
-        _installPathTextBox = new TextBox
-        {
-            BorderStyle = BorderStyle.FixedSingle,
-            Font = new Font(SerifFamily, 10F),
-            Text = InstallerContext.InstallRoot,
-            BackColor = VellumPaper,
-            ForeColor = VellumInk,
-            ReadOnly = true,
-            TabStop = false,
-            Cursor = Cursors.Hand,
-            Dock = DockStyle.Fill,
-            Margin = new Padding(0, 4, 8, 4)
-        };
-        _installPathTextBox.Click += BrowseInstallPathButtonOnClick;
-        _installPathTextBox.DoubleClick += BrowseInstallPathButtonOnClick;
-
-        _installPathBrowseButton = new VellumButton
-        {
-            ButtonKind = VellumButtonKind.Secondary,
-            BackColor = VellumPaper,
-            Text = "Change",
-            Size = new Size(86, 28),
+            Text = "取消",
+            Size = new Size(96, 34),
+            FlatStyle = FlatStyle.System,
             Anchor = AnchorStyles.Top | AnchorStyles.Right,
-            Margin = new Padding(0, 2, 0, 2)
+            UseVisualStyleBackColor = true
         };
-        _installPathBrowseButton.Click += BrowseInstallPathButtonOnClick;
+        _cancelButton.Click += OnCancelClick;
 
-        _installPathRow = new TableLayoutPanel
+        _commandBar.Controls.Add(_primaryButton);
+        _commandBar.Controls.Add(_cancelButton);
+        _commandBar.Resize += (_, _) => LayoutCommandBar();
+
+        // ---- Content host ----
+        _content = new Panel { Dock = DockStyle.Fill, BackColor = PageBack };
+
+        _header = new Panel { Dock = DockStyle.Top, Height = 78, BackColor = HeaderBack };
+        _header.Paint += HeaderOnPaint;
+
+        _titleLabel = new Label
         {
-            ColumnCount = 2,
-            RowCount = 1,
             AutoSize = false,
-            BackColor = VellumPaper,
-            Visible = false
+            Font = TitleFont,
+            ForeColor = TextPrimary,
+            BackColor = HeaderBack,
+            Location = new Point(28, 16),
+            Size = new Size(400, 30),
+            TextAlign = ContentAlignment.MiddleLeft
         };
-        _installPathRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        _installPathRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        _installPathRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        _installPathRow.Controls.Add(_installPathTextBox, 0, 0);
-        _installPathRow.Controls.Add(_installPathBrowseButton, 1, 0);
-
-        _launchCheckBox = new VellumCheckBox
+        _subtitleLabel = new Label
         {
-            Text = $"安装完成后启动 {InstallerContext.ProductName}",
+            AutoSize = false,
+            Font = SubtitleFont,
+            ForeColor = TextSecondary,
+            BackColor = HeaderBack,
+            Location = new Point(30, 48),
+            Size = new Size(400, 20),
+            TextAlign = ContentAlignment.MiddleLeft
+        };
+        _header.Controls.Add(_titleLabel);
+        _header.Controls.Add(_subtitleLabel);
+
+        _pageHost = new Panel { Dock = DockStyle.Fill, BackColor = PageBack, Padding = new Padding(28, 18, 28, 12) };
+
+        // ---- Welcome page ----
+        _welcomePage = new Panel { Dock = DockStyle.Fill, BackColor = PageBack };
+
+        _introLabel = new Label
+        {
+            AutoSize = false,
+            Font = BodyFont,
+            ForeColor = TextPrimary,
+            Location = new Point(0, 0),
+            Size = new Size(400, 44)
+        };
+
+        _infoCard = new Panel { Location = new Point(0, 52), Size = new Size(400, 52), BackColor = CardBack };
+        _infoCard.Paint += InfoCardOnPaint;
+        _versionValue = new Label { AutoSize = true, Font = BodyStrongFont, ForeColor = TextPrimary, BackColor = CardBack, Location = new Point(16, 22) };
+        _sizeValue = new Label { AutoSize = true, Font = BodyStrongFont, ForeColor = TextPrimary, BackColor = CardBack, Location = new Point(210, 22) };
+        _infoCard.Controls.Add(_versionValue);
+        _infoCard.Controls.Add(_sizeValue);
+
+        _pathLabel = new Label
+        {
+            AutoSize = true,
+            Font = BodyFont,
+            ForeColor = TextSecondary,
+            Location = new Point(0, 122),
+            Text = "安装位置"
+        };
+        _pathTextBox = new TextBox
+        {
+            Font = BodyFont,
+            Location = new Point(0, 146),
+            Size = new Size(300, 26),
+            Text = InstallerContext.InstallRoot
+        };
+        _browseButton = new Button
+        {
+            Text = "浏览…",
+            FlatStyle = FlatStyle.System,
+            UseVisualStyleBackColor = true,
+            Location = new Point(308, 145),
+            Size = new Size(92, 28)
+        };
+        _browseButton.Click += BrowseInstallPathButtonOnClick;
+
+        _launchCheckBox = new CheckBox
+        {
+            AutoSize = true,
+            Font = BodyFont,
+            ForeColor = TextPrimary,
             Checked = true,
-            Visible = false
+            Location = new Point(0, 190),
+            Text = $"安装完成后启动 {InstallerContext.ProductName}"
         };
 
-        _removeDataCheckBox = new VellumCheckBox
+        _removeDataCheckBox = new CheckBox
         {
-            Text = "同时移除本地数据（倒计时与设置）",
+            AutoSize = true,
+            Font = BodyFont,
+            ForeColor = TextPrimary,
             Checked = false,
-            Visible = false
+            Location = new Point(0, 96),
+            Text = "同时删除本地数据（倒计时与设置）"
         };
 
-        _progressBar = new VellumProgressBar { Visible = false };
+        _welcomePage.Controls.Add(_introLabel);
+        _welcomePage.Controls.Add(_infoCard);
+        _welcomePage.Controls.Add(_pathLabel);
+        _welcomePage.Controls.Add(_pathTextBox);
+        _welcomePage.Controls.Add(_browseButton);
+        _welcomePage.Controls.Add(_launchCheckBox);
+        _welcomePage.Controls.Add(_removeDataCheckBox);
 
-        _body.Controls.Add(_installPathRow);
-        _body.Controls.Add(_launchCheckBox);
-        _body.Controls.Add(_removeDataCheckBox);
-        _body.Controls.Add(_progressBar);
-        _body.Resize += (_, _) => LayoutBody();
+        // ---- Progress page ----
+        _progressPage = new Panel { Dock = DockStyle.Fill, BackColor = PageBack, Visible = false };
+        _progressStatusLabel = new Label
+        {
+            AutoSize = false,
+            Font = BodyStrongFont,
+            ForeColor = TextPrimary,
+            Location = new Point(0, 24),
+            Size = new Size(400, 26)
+        };
+        _progressDetailLabel = new Label
+        {
+            AutoSize = false,
+            Font = BodyFont,
+            ForeColor = TextSecondary,
+            Location = new Point(0, 54),
+            Size = new Size(400, 40),
+            AutoEllipsis = true
+        };
+        _progressBar = new ProgressBar
+        {
+            Location = new Point(0, 104),
+            Size = new Size(400, 14),
+            Minimum = 0,
+            Maximum = 100,
+            Style = ProgressBarStyle.Continuous
+        };
+        _progressPage.Controls.Add(_progressStatusLabel);
+        _progressPage.Controls.Add(_progressDetailLabel);
+        _progressPage.Controls.Add(_progressBar);
 
-        Controls.Add(_body);
-        Controls.Add(_topBar);
-        Controls.Add(_footer);
+        // ---- Complete page ----
+        _completePage = new Panel { Dock = DockStyle.Fill, BackColor = PageBack, Visible = false };
+        _completePage.Paint += CompletePageOnPaint;
+        _completeTitleLabel = new Label
+        {
+            AutoSize = false,
+            Font = BodyStrongFont,
+            ForeColor = TextPrimary,
+            Location = new Point(48, 22),
+            Size = new Size(352, 26)
+        };
+        _completeBodyLabel = new Label
+        {
+            AutoSize = false,
+            Font = BodyFont,
+            ForeColor = TextSecondary,
+            Location = new Point(48, 52),
+            Size = new Size(352, 80)
+        };
+        _completePage.Controls.Add(_completeTitleLabel);
+        _completePage.Controls.Add(_completeBodyLabel);
 
-        MouseDown += DragWindow;
-        _topBar.MouseDown += DragWindow;
-        _body.MouseDown += DragWindow;
-        _footer.MouseDown += DragWindow;
+        _pageHost.Controls.Add(_welcomePage);
+        _pageHost.Controls.Add(_progressPage);
+        _pageHost.Controls.Add(_completePage);
 
-        Shown += (_, _) => LayoutBody();
+        _content.Controls.Add(_pageHost);
+        _content.Controls.Add(_header);
+
+        Controls.Add(_content);
+        Controls.Add(_commandBar);
+        Controls.Add(_sidebar);
+
+        AcceptButton = _primaryButton;
+        CancelButton = _cancelButton;
+
+        Shown += (_, _) => { LayoutCommandBar(); };
         ShowWelcomeState();
     }
 
@@ -232,40 +321,68 @@ internal sealed class InstallerForm : Form
     {
         _stage = Stage.Welcome;
 
-        var canShowInstallPath = !_uninstallMode;
-        _installPathRow.Visible = canShowInstallPath;
-        _installPathTextBox.Text = InstallerContext.InstallRoot;
-        _launchCheckBox.Visible = !_uninstallMode;
+        _titleLabel.Text = _uninstallMode
+            ? $"卸载 {InstallerContext.ProductName}"
+            : $"安装 {InstallerContext.ProductName}";
+        _subtitleLabel.Text = _uninstallMode
+            ? "确认下列选项，然后点击“卸载”。"
+            : "确认安装位置与选项，然后点击“安装”。";
+
+        _introLabel.Text = _uninstallMode
+            ? $"本向导将从这台计算机中移除 {InstallerContext.ProductName}。"
+            : $"本向导将在这台计算机上安装 {InstallerContext.ProductName}。";
+
+        _versionValue.Text = $"版本  v{InstallerContext.ProductDisplayVersion}";
+        _sizeValue.Text = $"所需空间  {InstallerContext.PayloadInstalledSizeDisplay}";
+        _pathTextBox.Text = InstallerContext.InstallRoot;
+        _pathTextBox.SelectionStart = 0;
+        _pathTextBox.SelectionLength = 0;
+
+        var showInstallChrome = !_uninstallMode;
+        _infoCard.Visible = showInstallChrome;
+        _pathLabel.Visible = showInstallChrome;
+        _pathTextBox.Visible = showInstallChrome;
+        _browseButton.Visible = showInstallChrome;
+        _launchCheckBox.Visible = showInstallChrome;
         _removeDataCheckBox.Visible = _uninstallMode;
-        _progressBar.Visible = false;
 
-        _secondaryButton.Visible = true;
-        _secondaryButton.Enabled = true;
-        _secondaryButton.Text = "Quit";
-        _primaryButton.Text = "Proceed";
+        _welcomePage.Visible = true;
+        _progressPage.Visible = false;
+        _completePage.Visible = false;
+
+        _cancelButton.Visible = true;
+        _cancelButton.Enabled = true;
+        _cancelButton.Text = "取消";
+        _primaryButton.Visible = true;
         _primaryButton.Enabled = true;
+        _primaryButton.Text = _uninstallMode ? "卸载" : "安装";
 
-        LayoutBody();
-        Invalidate(true);
+        LayoutCommandBar();
+        _sidebar.Invalidate();
     }
 
     private void ShowProgressState(string title, string detail)
     {
         _stage = Stage.Progress;
-        _statusLine1 = title;
-        _statusLine2 = detail;
 
-        _installPathRow.Visible = false;
-        _launchCheckBox.Visible = false;
-        _removeDataCheckBox.Visible = false;
-        _progressBar.Visible = true;
+        _titleLabel.Text = _uninstallMode
+            ? "正在卸载"
+            : (_existingInstall ? "正在更新" : "正在安装");
+        _subtitleLabel.Text = "请稍候，正在处理程序文件……";
+
+        _progressStatusLabel.Text = title;
+        _progressDetailLabel.Text = detail;
         _progressBar.Value = 0;
 
-        _secondaryButton.Enabled = false;
+        _welcomePage.Visible = false;
+        _progressPage.Visible = true;
+        _completePage.Visible = false;
+
+        _cancelButton.Enabled = false;
         _primaryButton.Enabled = false;
 
-        LayoutBody();
-        Invalidate(true);
+        LayoutCommandBar();
+        _sidebar.Invalidate();
     }
 
     private void ShowCompleteState(string title, string body, string primaryText)
@@ -273,32 +390,34 @@ internal sealed class InstallerForm : Form
         ToggleBusy(false);
 
         _stage = Stage.Complete;
-        _statusLine1 = title;
-        _statusLine2 = body;
 
-        _installPathRow.Visible = false;
-        _launchCheckBox.Visible = false;
-        _removeDataCheckBox.Visible = false;
-        _progressBar.Visible = false;
+        _titleLabel.Text = _uninstallMode ? "卸载完成" : "安装完成";
+        _subtitleLabel.Text = _uninstallMode
+            ? $"{InstallerContext.ProductName} 已从这台计算机移除。"
+            : $"{InstallerContext.ProductName} 已准备就绪。";
 
-        _secondaryButton.Visible = false;
+        _completeTitleLabel.Text = title;
+        _completeBodyLabel.Text = body;
+
+        _welcomePage.Visible = false;
+        _progressPage.Visible = false;
+        _completePage.Visible = true;
+
+        _cancelButton.Visible = false;
         _primaryButton.Visible = true;
         _primaryButton.Text = primaryText;
         _primaryButton.Enabled = true;
 
-        LayoutBody();
-        Invalidate(true);
+        LayoutCommandBar();
+        _sidebar.Invalidate();
     }
 
     // =====================================================================
-    //  BUTTON DISPATCHERS — single Click handler per button, behaviour by stage
+    //  BUTTON DISPATCHERS
     // =====================================================================
 
     private async void OnPrimaryClick(object? sender, EventArgs e)
     {
-        // Welcome → kick off install/uninstall.
-        // Progress → button is disabled and never fires here.
-        // Complete → close the form.
         if (_stage == Stage.Complete)
         {
             Close();
@@ -313,11 +432,8 @@ internal sealed class InstallerForm : Form
         await PerformInstallOrUninstallAsync();
     }
 
-    private void OnSecondaryClick(object? sender, EventArgs e)
+    private void OnCancelClick(object? sender, EventArgs e)
     {
-        // Welcome → user wants to bail out before doing anything.
-        // Progress → button is disabled.
-        // Complete → button is hidden.
         if (_stage == Stage.Welcome)
         {
             Close();
@@ -330,10 +446,9 @@ internal sealed class InstallerForm : Form
 
         var progress = new Progress<InstallerProgress>(value =>
         {
-            _statusLine1 = value.Title;
-            _statusLine2 = value.Detail;
+            _progressStatusLabel.Text = value.Title;
+            _progressDetailLabel.Text = value.Detail;
             _progressBar.Value = Math.Clamp(value.Percent, 0, 100);
-            _body.Invalidate();
         });
 
         try
@@ -353,7 +468,7 @@ internal sealed class InstallerForm : Form
                     _removeDataCheckBox.Checked
                         ? $"{InstallerContext.ProductName} 与本地数据均已移除。"
                         : $"{InstallerContext.ProductName} 已移除，本地数据保留以便日后重装。",
-                    "Done");
+                    "完成");
                 return;
             }
 
@@ -377,13 +492,13 @@ internal sealed class InstallerForm : Form
                 _launchCheckBox.Checked
                     ? $"现在可以使用 {InstallerContext.ProductName} 管理截止日期与浮动倒计时卡片。"
                     : $"{InstallerContext.ProductName} 已成功安装。",
-                "Done");
+                "完成");
         }
         catch (Exception ex)
         {
             ToggleBusy(false);
             MessageBox.Show(
-                $"安装失败：{Environment.NewLine}{Environment.NewLine}{ex.Message}",
+                $"操作失败：{Environment.NewLine}{Environment.NewLine}{ex.Message}",
                 InstallerContext.ProductName,
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
@@ -395,8 +510,7 @@ internal sealed class InstallerForm : Form
     {
         UseWaitCursor = busy;
         _primaryButton.Enabled = !busy;
-        _secondaryButton.Enabled = !busy;
-        _closeButton.Enabled = !busy;
+        _cancelButton.Enabled = !busy;
     }
 
     private static async Task RunStaTask(Action action)
@@ -421,220 +535,156 @@ internal sealed class InstallerForm : Form
     }
 
     // =====================================================================
-    //  PAINT — TOP / FOOTER BARS
+    //  PAINT — SIDEBAR STEP TRACKER
     // =====================================================================
 
-    private void TopBarOnPaint(object? sender, PaintEventArgs e)
+    private void SidebarOnPaint(object? sender, PaintEventArgs e)
     {
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
-        g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+        g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
 
-        using var rulePen = new Pen(Color.FromArgb(110, CreamOnLeatherSoft), 0.6f);
-        g.DrawLine(rulePen, 0, _topBar.Height - 1, _topBar.Width, _topBar.Height - 1);
+        var bounds = _sidebar.ClientRectangle;
+        using (var gradient = new LinearGradientBrush(bounds, SidebarTop, SidebarBottom, LinearGradientMode.Vertical))
+        {
+            g.FillRectangle(gradient, bounds);
+        }
 
-        var iconSize = 22;
-        var iconY = (_topBar.Height - iconSize) / 2;
+        // Brand mark and product name.
+        var logoSize = 56;
+        var logoX = (bounds.Width - logoSize) / 2;
         if (_brandImage is not null)
         {
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            g.DrawImage(_brandImage, new Rectangle(14, iconY, iconSize, iconSize));
+            g.DrawImage(_brandImage, new Rectangle(logoX, 30, logoSize, logoSize));
         }
 
-        using var titleBrush = new SolidBrush(CreamOnLeather);
-        var title = "SIMPLE  ·  TIME  ·  COUNTDOWN";
-        var titleSize = g.MeasureString(title, MastBarTitleFont);
-        g.DrawString(title, MastBarTitleFont, titleBrush,
-            new PointF(14 + iconSize + 12, (_topBar.Height - titleSize.Height) / 2));
+        using var titleBrush = new SolidBrush(SidebarText);
+        using var dimBrush = new SolidBrush(SidebarTextDim);
+        using var centered = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+
+        var nameRect = new RectangleF(8, 94, bounds.Width - 16, 48);
+        g.DrawString(InstallerContext.ProductName, SidebarTitleFont, titleBrush, nameRect, centered);
+        var versionRect = new RectangleF(10, 146, bounds.Width - 20, 18);
+        g.DrawString($"v{InstallerContext.ProductDisplayVersion}", SidebarSmallFont, dimBrush, versionRect, centered);
+
+        // Step tracker.
+        var activeIndex = (int)_stage;
+        var stepY = 192;
+        const int rowHeight = 44;
+        for (var i = 0; i < _stepLabels.Length; i++)
+        {
+            var markerCenter = new PointF(34, stepY + 9);
+            var done = i < activeIndex;
+            var active = i == activeIndex;
+
+            // Connector to previous marker.
+            if (i > 0)
+            {
+                using var connector = new Pen(Color.FromArgb(120, 255, 255, 255), 1.4f);
+                g.DrawLine(connector, 34, stepY - rowHeight + 20, 34, stepY - 2);
+            }
+
+            if (active || done)
+            {
+                using var fill = new SolidBrush(active ? SidebarText : Color.FromArgb(190, 255, 255, 255));
+                g.FillEllipse(fill, markerCenter.X - 9, markerCenter.Y - 9, 18, 18);
+                if (done)
+                {
+                    using var check = new Pen(SidebarTop, 2f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+                    g.DrawLines(check,
+                    [
+                        new PointF(markerCenter.X - 4, markerCenter.Y),
+                        new PointF(markerCenter.X - 1, markerCenter.Y + 3.5f),
+                        new PointF(markerCenter.X + 4.5f, markerCenter.Y - 3.5f)
+                    ]);
+                }
+                else
+                {
+                    using var dot = new SolidBrush(SidebarTop);
+                    g.FillEllipse(dot, markerCenter.X - 3, markerCenter.Y - 3, 6, 6);
+                }
+            }
+            else
+            {
+                using var ring = new Pen(SidebarTextDim, 1.6f);
+                g.DrawEllipse(ring, markerCenter.X - 9, markerCenter.Y - 9, 18, 18);
+            }
+
+            var labelBrush = active ? titleBrush : dimBrush;
+            var labelFont = active ? StepActiveFont : StepFont;
+            g.DrawString(_stepLabels[i], labelFont, labelBrush, new PointF(54, stepY));
+            stepY += rowHeight;
+        }
     }
 
-    private void FooterOnPaint(object? sender, PaintEventArgs e)
+    // =====================================================================
+    //  PAINT — HEADER / COMMAND BAR / CARDS
+    // =====================================================================
+
+    private void HeaderOnPaint(object? sender, PaintEventArgs e)
+    {
+        using var pen = new Pen(Separator, 1f);
+        e.Graphics.DrawLine(pen, 0, _header.Height - 1, _header.Width, _header.Height - 1);
+    }
+
+    private void CommandBarOnPaint(object? sender, PaintEventArgs e)
+    {
+        using var pen = new Pen(Separator, 1f);
+        e.Graphics.DrawLine(pen, 0, 0, _commandBar.Width, 0);
+    }
+
+    private void InfoCardOnPaint(object? sender, PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+        var bounds = new Rectangle(0, 0, _infoCard.Width - 1, _infoCard.Height - 1);
+        using var border = new Pen(Separator, 1f);
+        g.DrawRectangle(border, bounds);
+
+        using var labelBrush = new SolidBrush(TextSecondary);
+        g.DrawString("版本", SidebarSmallFont, labelBrush, new PointF(16, 8));
+        g.DrawString("所需空间", SidebarSmallFont, labelBrush, new PointF(210, 8));
+    }
+
+    private void CompletePageOnPaint(object? sender, PaintEventArgs e)
     {
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
-        g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
 
-        using var rulePen = new Pen(Color.FromArgb(110, CreamOnLeatherSoft), 0.6f);
-        g.DrawLine(rulePen, 0, 0, _footer.Width, 0);
+        // Success check badge.
+        var center = new PointF(20, 34);
+        using var circle = new SolidBrush(Color.FromArgb(0x1F, 0x8A, 0x3D));
+        g.FillEllipse(circle, center.X - 14, center.Y - 14, 28, 28);
+        using var check = new Pen(Color.White, 2.4f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+        g.DrawLines(check,
+        [
+            new PointF(center.X - 6, center.Y),
+            new PointF(center.X - 1.5f, center.Y + 5),
+            new PointF(center.X + 7, center.Y - 5.5f)
+        ]);
     }
 
     // =====================================================================
-    //  PAINT — BODY (parchment page)
+    //  LAYOUT
     // =====================================================================
 
-    private void BodyOnPaint(object? sender, PaintEventArgs e)
+    private void LayoutCommandBar()
     {
-        var g = e.Graphics;
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+        var right = _commandBar.ClientSize.Width - 18;
+        var y = (_commandBar.Height - _primaryButton.Height) / 2;
 
-        var bounds = _body.ClientRectangle;
-        const int leftMargin = 50;
-        const int rightMargin = 50;
-        var width = bounds.Width - leftMargin - rightMargin;
-        var x = leftMargin;
-        var y = 28;
+        _primaryButton.Location = new Point(right - _primaryButton.Width, y);
 
-        // Centred ornament under the masthead bar
-        var ornament = "❦";
-        using var ornamentBrush = new SolidBrush(VellumGray);
-        var ornSize = g.MeasureString(ornament, OrnamentFont);
-        g.DrawString(ornament, OrnamentFont, ornamentBrush,
-            new PointF(x + (width - ornSize.Width) / 2, y));
-        y += (int)ornSize.Height + 10;
-
-        var titleText = TitleForStage();
-        using var inkBrush = new SolidBrush(VellumInk);
-        var titleFont = _stage == Stage.Welcome ? BigTitleFont : StatusBigFont;
-        var titleSize = g.MeasureString(titleText, titleFont);
-        g.DrawString(titleText, titleFont, inkBrush,
-            new PointF(x + (width - titleSize.Width) / 2, y));
-        y += (int)titleSize.Height + 22;
-
-        if (_stage == Stage.Welcome)
+        if (_cancelButton.Visible)
         {
-            DrawWelcomeBody(g, x, y, width);
+            _cancelButton.Location = new Point(_primaryButton.Left - _cancelButton.Width - 10, y);
         }
-        else if (_stage == Stage.Progress)
-        {
-            DrawProgressBody(g, x, y, width);
-        }
-        else
-        {
-            DrawCompleteBody(g, x, y, width);
-        }
-    }
-
-    private void DrawWelcomeBody(Graphics g, int x, int y, int width)
-    {
-        var boxHeight = 46;
-        var gap = 10;
-        var boxWidth = (width - gap * 2) / 3;
-        var year = DateTime.Now.Year.ToString();
-
-        DrawMetaBox(g, new Rectangle(x, y, boxWidth, boxHeight), "EDITION", $"v{InstallerContext.ProductDisplayVersion}");
-        DrawMetaBox(g, new Rectangle(x + boxWidth + gap, y, boxWidth, boxHeight), "ISSUED", year);
-        DrawMetaBox(g, new Rectangle(x + 2 * (boxWidth + gap), y, boxWidth, boxHeight), "WEIGHT", InstallerContext.PayloadInstalledSizeDisplay);
-    }
-
-    private void DrawProgressBody(Graphics g, int x, int y, int width)
-    {
-        using var inkBrush = new SolidBrush(VellumInk);
-        using var grayBrush = new SolidBrush(VellumGray);
-
-        DrawSmallCapsHeading(g, x, y, width, "条款三  ·  正在执行");
-        y += 18;
-        DrawDoubleRule(g, x, y, width);
-        y += 14;
-
-        var statusSize = g.MeasureString(_statusLine1, StatusBigFont, width);
-        g.DrawString(_statusLine1, StatusBigFont, inkBrush, new RectangleF(x, y, width, 200));
-        y += (int)statusSize.Height + 6;
-
-        g.DrawString(_statusLine2, ArticleBodyFont, grayBrush, new RectangleF(x, y, width, 200));
-    }
-
-    private void DrawCompleteBody(Graphics g, int x, int y, int width)
-    {
-        using var inkBrush = new SolidBrush(VellumInk);
-        using var grayBrush = new SolidBrush(VellumGray);
-
-        DrawSmallCapsHeading(g, x, y, width, "条款四  ·  已完成");
-        y += 18;
-        DrawDoubleRule(g, x, y, width);
-        y += 16;
-
-        var titleSize = g.MeasureString(_statusLine1, StatusBigFont, width);
-        g.DrawString(_statusLine1, StatusBigFont, inkBrush, new RectangleF(x, y, width, 100));
-        y += (int)titleSize.Height + 6;
-
-        g.DrawString(_statusLine2, ArticleBodyFont, grayBrush, new RectangleF(x, y, width, 200));
-    }
-
-    // =====================================================================
-    //  PAINT HELPERS
-    // =====================================================================
-
-    private static void DrawMetaBox(Graphics g, Rectangle rect, string label, string value)
-    {
-        using var pen = new Pen(VellumInkSoft, 0.6f);
-        g.DrawRectangle(pen, rect);
-
-        using var labelBrush = new SolidBrush(VellumGray);
-        using var valueBrush = new SolidBrush(VellumInk);
-
-        var labelSize = g.MeasureString(label, BoxLabelFont);
-        var valueSize = g.MeasureString(value, BoxValueFont);
-
-        g.DrawString(label, BoxLabelFont, labelBrush,
-            new PointF(rect.X + (rect.Width - labelSize.Width) / 2, rect.Y + 6));
-        g.DrawString(value, BoxValueFont, valueBrush,
-            new PointF(rect.X + (rect.Width - valueSize.Width) / 2, rect.Y + 6 + labelSize.Height + 1));
-    }
-
-    private static void DrawSmallCapsHeading(Graphics g, int x, int y, int width, string heading)
-    {
-        using var headingBrush = new SolidBrush(VellumInkSoft);
-        var headingSize = g.MeasureString(heading, ArticleHeadingFont);
-        g.DrawString(heading, ArticleHeadingFont, headingBrush, new PointF(x, y));
-
-        var ruleStart = (int)(x + headingSize.Width + 10);
-        var ruleEnd = x + width;
-        var ruleY = (int)(y + headingSize.Height / 2);
-        if (ruleEnd > ruleStart + 20)
-        {
-            using var rulePen = new Pen(Color.FromArgb(120, VellumInkSoft), 0.5f);
-            g.DrawLine(rulePen, ruleStart, ruleY, ruleEnd, ruleY);
-        }
-    }
-
-    private static void DrawDoubleRule(Graphics g, int x, int y, int width)
-    {
-        using var pen = new Pen(Color.FromArgb(180, VellumInkSoft), 0.6f);
-        g.DrawLine(pen, x, y, x + width, y);
-        g.DrawLine(pen, x, y + 3, x + width, y + 3);
-    }
-
-    // =====================================================================
-    //  LAYOUT — controls inside the parchment body, anchored from bottom
-    // =====================================================================
-
-    private void LayoutBody()
-    {
-        const int leftMargin = 50;
-        const int rightMargin = 50;
-        var width = _body.ClientSize.Width - leftMargin - rightMargin;
-        if (width <= 0)
-        {
-            return;
-        }
-
-        var optionH = _launchCheckBox.PreferredSize.Height;
-        var optionY = _body.ClientSize.Height - optionH - 18;
-        _launchCheckBox.SetBounds(leftMargin, optionY, width, optionH);
-        _removeDataCheckBox.SetBounds(leftMargin, optionY, width, optionH);
-
-        var pathRowH = Math.Max(_installPathTextBox.PreferredSize.Height, _installPathBrowseButton.Height) + 4;
-        var pathY = optionY - pathRowH - 14;
-        _installPathRow.SetBounds(leftMargin, pathY, width, pathRowH);
-
-        _progressBar.SetBounds(leftMargin, optionY, width, 12);
     }
 
     // =====================================================================
     //  HELPERS
     // =====================================================================
-
-    private string TitleForStage()
-    {
-        if (_stage == Stage.Welcome)
-        {
-            return InstallerContext.ProductName;
-        }
-        return _stage == Stage.Progress
-            ? (_uninstallMode ? "正在卸载" : (_existingInstall ? "正在更新" : "正在安装"))
-            : (_uninstallMode ? "卸载完成" : "安装完成");
-    }
 
     private void BrowseInstallPathButtonOnClick(object? sender, EventArgs e)
     {
@@ -642,14 +692,14 @@ internal sealed class InstallerForm : Form
         {
             Description = $"选择 {InstallerContext.ProductName} 的安装目录",
             UseDescriptionForTitle = true,
-            SelectedPath = string.IsNullOrWhiteSpace(_installPathTextBox.Text)
+            SelectedPath = string.IsNullOrWhiteSpace(_pathTextBox.Text)
                 ? InstallerContext.DefaultInstallRoot
-                : _installPathTextBox.Text
+                : _pathTextBox.Text
         };
 
         if (dialog.ShowDialog(this) == DialogResult.OK)
         {
-            _installPathTextBox.Text = dialog.SelectedPath;
+            _pathTextBox.Text = dialog.SelectedPath;
         }
     }
 
@@ -660,12 +710,25 @@ internal sealed class InstallerForm : Form
             return InstallerContext.InstallRoot;
         }
 
-        var rawPath = _installPathTextBox.Text.Trim();
+        var rawPath = _pathTextBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(rawPath))
         {
             throw new InvalidOperationException("Install directory cannot be empty.");
         }
         return Path.GetFullPath(Environment.ExpandEnvironmentVariables(rawPath));
+    }
+
+    private static Icon? TryLoadFormIcon()
+    {
+        try
+        {
+            var path = Environment.ProcessPath;
+            return string.IsNullOrWhiteSpace(path) ? null : Icon.ExtractAssociatedIcon(path);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static Image? LoadBrandImage()
@@ -683,255 +746,66 @@ internal sealed class InstallerForm : Form
         buffer.Position = 0;
         return Image.FromStream(buffer);
     }
-
-    private void DragWindow(object? sender, MouseEventArgs e)
-    {
-        if (e.Button != MouseButtons.Left) return;
-        NativeMethods.ReleaseCapture();
-        NativeMethods.SendMessage(Handle, 0xA1, 0x2, 0);
-    }
-
-    private static class NativeMethods
-    {
-        [System.Runtime.InteropServices.DllImport("user32.dll")]
-        public static extern bool ReleaseCapture();
-
-        [System.Runtime.InteropServices.DllImport("user32.dll")]
-        public static extern nint SendMessage(nint hWnd, int msg, int wParam, int lParam);
-    }
 }
 
 // =====================================================================
 //  HELPER CONTROLS
 // =====================================================================
 
-internal sealed class BufferedPanel : Panel
+internal sealed class DoubleBufferedPanel : Panel
 {
-    public BufferedPanel()
+    public DoubleBufferedPanel()
     {
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint
                  | ControlStyles.ResizeRedraw, true);
     }
 }
 
-internal enum VellumButtonKind { Primary, Secondary, FooterSecondary }
-
-internal sealed class VellumButton : Button
+/// <summary>Filled accent command button used for the primary wizard action.</summary>
+internal sealed class AccentButton : Button
 {
-    private static readonly Color VellumInk = Color.FromArgb(0x1F, 0x1A, 0x12);
-    private static readonly Color VellumOxblood = Color.FromArgb(0x7A, 0x2E, 0x2E);
-    private static readonly Color VellumInkSoft = Color.FromArgb(0x4A, 0x3A, 0x22);
-    private static readonly Color CreamOnLeather = Color.FromArgb(0xF0, 0xE6, 0xD2);
-    private static readonly Color CreamOnLeatherSoft = Color.FromArgb(0xC8, 0xB4, 0x90);
+    private static readonly Color Accent = Color.FromArgb(0x0F, 0x6C, 0xBD);
+    private static readonly Color AccentHover = Color.FromArgb(0x11, 0x5E, 0xA3);
+    private static readonly Color AccentDown = Color.FromArgb(0x0E, 0x4F, 0x86);
+    private static readonly Color AccentDisabled = Color.FromArgb(0xC7, 0xC7, 0xC7);
 
     private bool _hover;
+    private bool _pressed;
 
-    public VellumButtonKind ButtonKind { get; set; } = VellumButtonKind.Secondary;
-
-    public VellumButton()
+    public AccentButton()
     {
         FlatStyle = FlatStyle.Flat;
         FlatAppearance.BorderSize = 0;
+        ForeColor = Color.White;
+        BackColor = Accent;
         UseVisualStyleBackColor = false;
         Cursor = Cursors.Hand;
-        Font = new Font("Cambria", 10.5F, FontStyle.Regular, GraphicsUnit.Point);
+        Font = new Font("Microsoft YaHei UI", 9.75F, FontStyle.Regular, GraphicsUnit.Point);
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
                  | ControlStyles.ResizeRedraw, true);
     }
 
     protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
-    protected override void OnMouseLeave(EventArgs e) { _hover = false; Invalidate(); base.OnMouseLeave(e); }
+    protected override void OnMouseLeave(EventArgs e) { _hover = false; _pressed = false; Invalidate(); base.OnMouseLeave(e); }
+    protected override void OnMouseDown(MouseEventArgs e) { _pressed = true; Invalidate(); base.OnMouseDown(e); }
+    protected override void OnMouseUp(MouseEventArgs e) { _pressed = false; Invalidate(); base.OnMouseUp(e); }
     protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
 
     protected override void OnPaint(PaintEventArgs pevent)
     {
         var g = pevent.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
-        g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-        var bounds = new Rectangle(0, 0, Width - 1, Height - 1);
+        g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
 
-        using (var backgroundBrush = new SolidBrush(ResolveBackgroundColor()))
+        var fill = !Enabled
+            ? AccentDisabled
+            : (_pressed ? AccentDown : (_hover ? AccentHover : Accent));
+        using (var brush = new SolidBrush(fill))
         {
-            g.FillRectangle(backgroundBrush, ClientRectangle);
+            g.FillRectangle(brush, ClientRectangle);
         }
 
-        Color fill, frame, fore;
-        if (ButtonKind == VellumButtonKind.Primary)
-        {
-            fill = !Enabled
-                ? Color.FromArgb(180, VellumInk)
-                : (_hover ? VellumOxblood : VellumInk);
-            frame = fill;
-            fore = CreamOnLeather;
-        }
-        else if (ButtonKind == VellumButtonKind.FooterSecondary)
-        {
-            fill = Color.Transparent;
-            frame = !Enabled
-                ? Color.FromArgb(90, CreamOnLeatherSoft)
-                : (_hover ? CreamOnLeather : CreamOnLeatherSoft);
-            fore = !Enabled
-                ? Color.FromArgb(110, CreamOnLeatherSoft)
-                : (_hover ? CreamOnLeather : CreamOnLeatherSoft);
-        }
-        else
-        {
-            fill = Color.Transparent;
-            frame = !Enabled
-                ? Color.FromArgb(120, VellumInk)
-                : (_hover ? VellumOxblood : VellumInk);
-            fore = !Enabled
-                ? Color.FromArgb(140, VellumInk)
-                : (_hover ? VellumOxblood : VellumInk);
-        }
-
-        if (fill != Color.Transparent)
-        {
-            using var fillBrush = new SolidBrush(fill);
-            g.FillRectangle(fillBrush, bounds);
-        }
-        using var pen = new Pen(frame, 0.8f);
-        g.DrawRectangle(pen, bounds);
-
-        var label = (Text ?? string.Empty).ToUpperInvariant();
-        var textSize = g.MeasureString(label, Font);
-        using var foreBrush = new SolidBrush(fore);
-        g.DrawString(label, Font, foreBrush,
-            new PointF((Width - textSize.Width) / 2f, (Height - textSize.Height) / 2f));
-    }
-
-    private Color ResolveBackgroundColor()
-    {
-        if (BackColor != Color.Transparent)
-        {
-            return BackColor;
-        }
-
-        return Parent?.BackColor ?? SystemColors.Control;
-    }
-}
-
-internal sealed class VellumCheckBox : Control
-{
-    private static readonly Color VellumPaper = Color.FromArgb(0xED, 0xE3, 0xCE);
-    private static readonly Color VellumInk = Color.FromArgb(0x1F, 0x1A, 0x12);
-    private static readonly Color VellumGray = Color.FromArgb(0x6B, 0x5A, 0x3F);
-    private static readonly Color VellumOxblood = Color.FromArgb(0x7A, 0x2E, 0x2E);
-
-    private bool _checked;
-    private bool _hover;
-
-    public event EventHandler? CheckedChanged;
-
-    public bool Checked
-    {
-        get => _checked;
-        set
-        {
-            if (_checked == value) return;
-            _checked = value;
-            Invalidate();
-            CheckedChanged?.Invoke(this, EventArgs.Empty);
-        }
-    }
-
-    public VellumCheckBox()
-    {
-        BackColor = VellumPaper;
-        ForeColor = VellumInk;
-        Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Regular, GraphicsUnit.Point);
-        Cursor = Cursors.Hand;
-        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
-                 | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);
-    }
-
-    public override Size GetPreferredSize(Size proposedSize)
-    {
-        using var g = CreateGraphics();
-        var size = g.MeasureString(Text ?? string.Empty, Font);
-        return new Size((int)Math.Ceiling(size.Width) + 28, Math.Max(20, (int)Math.Ceiling(size.Height) + 4));
-    }
-
-    protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
-    protected override void OnMouseLeave(EventArgs e) { _hover = false; Invalidate(); base.OnMouseLeave(e); }
-
-    protected override void OnClick(EventArgs e)
-    {
-        Checked = !Checked;
-        base.OnClick(e);
-    }
-
-    protected override void OnPaint(PaintEventArgs e)
-    {
-        var g = e.Graphics;
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-
-        var boxSize = 14;
-        var boxY = (Height - boxSize) / 2;
-        var box = new Rectangle(0, boxY, boxSize, boxSize);
-
-        using var framePen = new Pen(_hover ? VellumOxblood : VellumInk, 0.8f);
-        g.DrawRectangle(framePen, box);
-
-        if (_checked)
-        {
-            using var tickPen = new Pen(VellumOxblood, 1.6f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-            g.DrawLine(tickPen,
-                box.Left + 2.5f, box.Top + boxSize / 2f,
-                box.Left + boxSize / 2f, box.Bottom - 3f);
-            g.DrawLine(tickPen,
-                box.Left + boxSize / 2f, box.Bottom - 3f,
-                box.Right - 2f, box.Top + 2.5f);
-        }
-
-        using var textBrush = new SolidBrush(_hover ? VellumOxblood : VellumGray);
-        g.DrawString(Text ?? string.Empty, Font, textBrush,
-            new PointF(box.Right + 8, (Height - g.MeasureString(Text ?? string.Empty, Font).Height) / 2));
-    }
-}
-
-internal sealed class VellumProgressBar : Control
-{
-    private static readonly Color VellumInk = Color.FromArgb(0x1F, 0x1A, 0x12);
-    private static readonly Color VellumOxblood = Color.FromArgb(0x7A, 0x2E, 0x2E);
-    private static readonly Color VellumPaper = Color.FromArgb(0xED, 0xE3, 0xCE);
-
-    private int _value;
-
-    public int Value
-    {
-        get => _value;
-        set
-        {
-            var v = Math.Clamp(value, 0, 100);
-            if (v == _value) return;
-            _value = v;
-            Invalidate();
-        }
-    }
-
-    public VellumProgressBar()
-    {
-        BackColor = VellumPaper;
-        Height = 12;
-        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
-                 | ControlStyles.ResizeRedraw, true);
-    }
-
-    protected override void OnPaint(PaintEventArgs e)
-    {
-        var g = e.Graphics;
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        var bounds = new Rectangle(0, 0, Width - 1, Height - 1);
-
-        using var pen = new Pen(VellumInk, 0.6f);
-        g.DrawRectangle(pen, bounds);
-
-        if (_value <= 0) return;
-        var fillWidth = (int)Math.Round((bounds.Width - 2) * (_value / 100.0));
-        var fillRect = new Rectangle(bounds.X + 1, bounds.Y + 1, fillWidth, bounds.Height - 1);
-        using var fillBrush = new SolidBrush(VellumOxblood);
-        g.FillRectangle(fillBrush, fillRect);
+        TextRenderer.DrawText(g, Text, Font, ClientRectangle, Color.White,
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
     }
 }
