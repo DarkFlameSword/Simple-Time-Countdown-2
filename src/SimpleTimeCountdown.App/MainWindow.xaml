@@ -116,7 +116,7 @@
             </Border>
 
             <!-- Masthead -->
-            <StackPanel Grid.Row="1" Margin="40,28,40,0" HorizontalAlignment="Center" MouseLeftButtonDown="Header_OnMouseLeftButtonDown">
+            <StackPanel Grid.Row="1" Margin="20,28,20,0" HorizontalAlignment="Center" MouseLeftButtonDown="Header_OnMouseLeftButtonDown">
                 <Grid HorizontalAlignment="Center" Margin="0,0,0,8">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="140" />
@@ -138,14 +138,20 @@
                     </StackPanel>
                 </Grid>
 
-                <TextBlock HorizontalAlignment="Center"
-                           FontFamily="{StaticResource SerifFont}"
-                           FontWeight="Bold"
-                           FontSize="40"
-                           Foreground="{StaticResource InkBrush}"
-                           TextAlignment="Center">
-                    <Run Text="SIMPLE" /><Run Text="  ·  " Foreground="{StaticResource RuleBrush}" /><Run Text="TIME" /><Run Text="  ·  " Foreground="{StaticResource RuleBrush}" /><Run Text="COUNTDOWN" />
-                </TextBlock>
+                <!-- One unbreakable 25-character line, so its design size is chosen to fit the
+                     panel at its narrowest and then scales up with everything else. The Viewbox
+                     only guards against clipping if a future title outgrows the panel. -->
+                <Viewbox HorizontalAlignment="Center"
+                         Stretch="Uniform"
+                         StretchDirection="DownOnly">
+                    <TextBlock FontFamily="{StaticResource SerifFont}"
+                               FontWeight="Bold"
+                               FontSize="{Binding Path=(controls:UiScale.FontScale), RelativeSource={RelativeSource Self}, Converter={StaticResource ScaledFontSize}, ConverterParameter=22}"
+                               Foreground="{StaticResource InkBrush}"
+                               TextAlignment="Center">
+                        <Run Text="SIMPLE" /><Run Text="  ·  " Foreground="{StaticResource RuleBrush}" /><Run Text="TIME" /><Run Text="  ·  " Foreground="{StaticResource RuleBrush}" /><Run Text="COUNTDOWN" />
+                    </TextBlock>
+                </Viewbox>
 
                 <Grid HorizontalAlignment="Center" Margin="0,8,0,0">
                     <Grid.ColumnDefinitions>
@@ -172,21 +178,26 @@
                            Margin="0,12,0,0"
                            FontFamily="{StaticResource SerifFont}"
                            FontStyle="Italic"
-                           FontSize="12"
+                           FontSize="{Binding Path=(controls:UiScale.FontScale), RelativeSource={RelativeSource Self}, Converter={StaticResource ScaledFontSize}, ConverterParameter=12}"
                            Foreground="{StaticResource InkSoftBrush}"
                            Text="{Binding [Casebook.Subtitle], Source={StaticResource Loc}}" />
 
+                <!-- Localized time-zone names run long (the Chinese names are several times the
+                     width of the English ids), so this line wraps onto another line rather than
+                     being fitted down to an unreadable size, and keeps the scale it is given. -->
                 <TextBlock HorizontalAlignment="Center"
                            Margin="0,4,0,0"
                            FontFamily="{StaticResource SerifFont}"
-                           FontSize="12"
+                           FontSize="{Binding Path=(controls:UiScale.FontScale), RelativeSource={RelativeSource Self}, Converter={StaticResource ScaledFontSize}, ConverterParameter=12}"
                            Foreground="{StaticResource InkSoftBrush}"
+                           TextAlignment="Center"
+                           TextWrapping="Wrap"
                            Text="{Binding CurrentTimeDisplay}" />
 
                 <Grid Margin="0,18,0,0">
                     <Border Height="1" Background="{StaticResource RuleBrush}" Opacity="0.7" />
                     <Border HorizontalAlignment="Center" Background="{StaticResource PaperBrush}" Padding="8,0">
-                        <TextBlock Text="❦" FontFamily="Segoe UI Symbol" FontSize="14" Foreground="{StaticResource RuleBrush}" />
+                        <TextBlock Text="❦" FontFamily="Segoe UI Symbol" FontSize="{Binding Path=(controls:UiScale.FontScale), RelativeSource={RelativeSource Self}, Converter={StaticResource ScaledFontSize}, ConverterParameter=14}" Foreground="{StaticResource RuleBrush}" />
                     </Border>
                 </Grid>
             </StackPanel>
@@ -205,7 +216,7 @@
                 <TextBlock HorizontalAlignment="Center"
                            FontFamily="{StaticResource SerifFont}"
                            FontStyle="Italic"
-                           FontSize="14"
+                           FontSize="{Binding Path=(controls:UiScale.FontScale), RelativeSource={RelativeSource Self}, Converter={StaticResource ScaledFontSize}, ConverterParameter=14}"
                            Foreground="{StaticResource InkSoftBrush}"
                            Text="{Binding [Main.Empty], Source={StaticResource Loc}}" />
             </Grid>
@@ -267,7 +278,7 @@
                                     <StackPanel Grid.Column="0">
                                         <TextBlock FontFamily="{StaticResource SerifFont}"
                                                    FontWeight="SemiBold"
-                                                   FontSize="28"
+                                                   FontSize="{Binding Path=(controls:UiScale.FontScale), RelativeSource={RelativeSource Self}, Converter={StaticResource ScaledFontSize}, ConverterParameter=28}"
                                                    Foreground="{StaticResource InkBrush}"
                                                    Text="{Binding Title}"
                                                    TextTrimming="CharacterEllipsis" />
@@ -283,7 +294,7 @@
                                         <StackPanel Margin="0,0,12,0">
                                             <TextBlock FontFamily="{StaticResource SerifFont}"
                                                        FontWeight="Bold"
-                                                       FontSize="40"
+                                                       FontSize="{Binding Path=(controls:UiScale.FontScale), RelativeSource={RelativeSource Self}, Converter={StaticResource ScaledFontSize}, ConverterParameter=40}"
                                                        HorizontalAlignment="Right"
                                                        Foreground="{Binding StatusAccentBrush}"
                                                        Text="{Binding PrimaryUnitsLeading}" />
@@ -294,7 +305,7 @@
                                         <StackPanel>
                                             <TextBlock FontFamily="{StaticResource SerifFont}"
                                                        FontWeight="Bold"
-                                                       FontSize="40"
+                                                       FontSize="{Binding Path=(controls:UiScale.FontScale), RelativeSource={RelativeSource Self}, Converter={StaticResource ScaledFontSize}, ConverterParameter=40}"
                                                        HorizontalAlignment="Right"
                                                        Foreground="{Binding StatusAccentBrush}"
                                                        Text="{Binding PrimaryUnitsTrailing}" />
@@ -341,7 +352,7 @@
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Grid.Column="0" HorizontalAlignment="Left" x:Name="LapsedBlock">
                                         <TextBlock FontFamily="{StaticResource SerifFont}"
-                                                   FontSize="13"
+                                                   FontSize="{Binding Path=(controls:UiScale.FontScale), RelativeSource={RelativeSource Self}, Converter={StaticResource ScaledFontSize}, ConverterParameter=13}"
                                                    Foreground="{StaticResource InkBrush}"
                                                    Text="{Binding LapsedPercentDisplay}" />
                                         <TextBlock Style="{StaticResource SmallCapsLabel}"

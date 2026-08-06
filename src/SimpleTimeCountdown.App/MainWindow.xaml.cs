@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
+using TimeCountdown.Controls;
 using TimeCountdown.Models;
 using TimeCountdown.Services;
 using TimeCountdown.ViewModels;
@@ -12,6 +13,13 @@ namespace TimeCountdown;
 
 public partial class MainWindow : Window
 {
+    // Panel width the type sizes in MainWindow.xaml were laid out against. The panel opens at
+    // this width, so an untouched window renders at its design sizes (scale 1.0) and only grows
+    // once the user enlarges it — which is how the type keeps up on high-resolution displays.
+    private const double DesignPanelWidth = 420;
+    private const double MinFontScale = 0.85;
+    private const double MaxFontScale = 1.6;
+
     private readonly DesktopLayerService _desktopLayerService = new();
     private readonly LocalizationService _localization = LocalizationService.Instance;
     private readonly MainWindowViewModel _viewModel;
@@ -39,6 +47,7 @@ public partial class MainWindow : Window
         var settings = _viewModel.Settings;
         Width = settings.WindowWidth > 300 ? settings.WindowWidth : 420;
         Height = settings.WindowHeight > 500 ? settings.WindowHeight : 760;
+        UpdateFontScale();
 
         if (double.IsNaN(settings.WindowLeft) || double.IsNaN(settings.WindowTop))
         {
@@ -232,6 +241,10 @@ public partial class MainWindow : Window
 
     private void Window_OnLocationOrSizeChanged(object sender, EventArgs e)
     {
+        // Type tracks the panel size even before the window finishes loading, so this runs
+        // ahead of the guard that limits bounds persistence to a normal, loaded window.
+        UpdateFontScale();
+
         if (!IsLoaded || WindowState != WindowState.Normal)
         {
             return;
@@ -244,6 +257,23 @@ public partial class MainWindow : Window
     private void Window_OnActivated(object? sender, EventArgs e)
     {
         _desktopLayerService.UpdatePlacement(this);
+    }
+
+    /// <summary>
+    /// Recomputes the panel's font scale from its current width and publishes it to the visual
+    /// tree, where text elements pick it up through the inherited UiScale.FontScale property.
+    /// Width drives the factor because it is what constrains a line of text; the result is
+    /// clamped so an extreme window size cannot render the panel unreadable.
+    /// </summary>
+    private void UpdateFontScale()
+    {
+        var width = ActualWidth > 0 ? ActualWidth : Width;
+        if (double.IsNaN(width) || width <= 0)
+        {
+            return;
+        }
+
+        UiScale.SetFontScale(this, Math.Clamp(width / DesignPanelWidth, MinFontScale, MaxFontScale));
     }
 
     private void ViewModelOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
