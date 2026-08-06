@@ -100,25 +100,31 @@ public sealed class CigarCountdown : FrameworkElement
         // Burning travels right -> left; the ember position marks the start of ash on the right.
         var ashStartX = cigarRight - progress * cigarLen;
 
+        // At full progress the deadline has passed: the cigar is gone and only a cold heap of ash is left.
+        var burntOut = progress >= 1;
+
         // ===== 1. Baselines (newspaper-rule feel) =====
         dc.DrawLine(BaselinePen, new Point(padding - 8, 114), new Point(cigarRight + 8, 114));
         dc.DrawLine(BaselineThin, new Point(padding - 8, 116.5), new Point(cigarRight + 8, 116.5));
 
-        // ===== 2. Cut end (left exposed leaves) =====
-        var cutGeo = new StreamGeometry();
-        using (var cgc = cutGeo.Open())
+        // ===== 2. Cut end (left exposed leaves) — only while the cigar still stands =====
+        if (!burntOut)
         {
-            cgc.BeginFigure(new Point(cigarLeft, cigarTop), true, true);
-            cgc.QuadraticBezierTo(new Point(cigarLeft - 6, (cigarTop + cigarBot) / 2), new Point(cigarLeft, cigarBot), true, false);
-            cgc.LineTo(new Point(cigarLeft + 4, cigarBot), true, false);
-            cgc.LineTo(new Point(cigarLeft + 4, cigarTop), true, false);
-        }
-        cutGeo.Freeze();
-        dc.DrawGeometry(TobaccoDark, InkPen, cutGeo);
-        for (var i = 0; i < 4; i++)
-        {
-            var ly = cigarTop + 4 + i * 4.4;
-            dc.DrawLine(new Pen(TobaccoCut, 0.5) { DashStyle = DashStyles.Dot }, new Point(cigarLeft - 4, ly), new Point(cigarLeft + 3, ly));
+            var cutGeo = new StreamGeometry();
+            using (var cgc = cutGeo.Open())
+            {
+                cgc.BeginFigure(new Point(cigarLeft, cigarTop), true, true);
+                cgc.QuadraticBezierTo(new Point(cigarLeft - 6, (cigarTop + cigarBot) / 2), new Point(cigarLeft, cigarBot), true, false);
+                cgc.LineTo(new Point(cigarLeft + 4, cigarBot), true, false);
+                cgc.LineTo(new Point(cigarLeft + 4, cigarTop), true, false);
+            }
+            cutGeo.Freeze();
+            dc.DrawGeometry(TobaccoDark, InkPen, cutGeo);
+            for (var i = 0; i < 4; i++)
+            {
+                var ly = cigarTop + 4 + i * 4.4;
+                dc.DrawLine(new Pen(TobaccoCut, 0.5) { DashStyle = DashStyles.Dot }, new Point(cigarLeft - 4, ly), new Point(cigarLeft + 3, ly));
+            }
         }
 
         // ===== 3. Cigar body (unburned portion: cigarLeft .. ashStartX) =====
@@ -166,8 +172,8 @@ public sealed class CigarCountdown : FrameworkElement
             dc.DrawEllipse(GoldBandDark, null, center, 0.8, 0.8);
         }
 
-        // ===== 5. Ash (right side, irregular shape) =====
-        if (progress > 0 && ashStartX < cigarRight)
+        // ===== 5. Ash (right side, irregular shape) — the receding burn line, not the final heap =====
+        if (!burntOut && progress > 0 && ashStartX < cigarRight)
         {
             var burnedLen = cigarRight - ashStartX;
             var segments = Math.Max(4, (int)(burnedLen / 8));
@@ -278,12 +284,10 @@ public sealed class CigarCountdown : FrameworkElement
             dc.DrawEllipse(null, SmokePenWisp, new Point(ashStartX - 4, cigarTop - 36), 2.5, 2.5);
             dc.DrawEllipse(null, SmokePenWisp, new Point(ashStartX + 6, cigarTop - 28), 2, 2);
         }
-        else if (progress >= 1)
+        else if (burntOut)
         {
-            var ft = new FormattedText("finis", CultureInfo.InvariantCulture, System.Windows.FlowDirection.LeftToRight,
-                new Typeface(new FontFamily("Cambria"), FontStyles.Italic, FontWeights.Normal, FontStretches.Normal),
-                10, InkFaint, VisualTreeHelper.GetDpi(this).PixelsPerDip);
-            dc.DrawText(ft, new Point(cigarRight - ft.Width, 84));
+            // Deadline reached: no ember, no smoke — the cigar has collapsed into a cold heap of ash.
+            DrawBurntOutRemains(dc, cigarLeft, cigarRight);
         }
 
         // ===== 7. Tick scale =====
@@ -293,6 +297,72 @@ public sealed class CigarCountdown : FrameworkElement
             var major = i % 5 == 0;
             dc.DrawLine(major ? TickMajorPen : TickMinorPen, new Point(x, 100), new Point(x, major ? 108 : 104));
         }
+    }
+
+    /// <summary>
+    /// Draws the final state once the deadline has passed: a small, cold heap of ash resting
+    /// on the baseline where the cigar used to be, with an engraved "finis" caption. No ember,
+    /// smoke, or halo is drawn here — the burn is over.
+    /// </summary>
+    private void DrawBurntOutRemains(DrawingContext dc, double cigarLeft, double cigarRight)
+    {
+        var centerX = (cigarLeft + cigarRight) / 2;
+        var cigarLen = cigarRight - cigarLeft;
+        const double groundY = 96;
+        const double peak = 30;
+        var heapHalf = Math.Min(72, cigarLen * 0.26);
+        var seed = unchecked(GetHashCode());
+
+        // Soft cast shadow grounding the heap.
+        dc.DrawEllipse(new SolidColorBrush(Color.FromArgb(0x2A, 0x2A, 0x1A, 0x10)), null,
+            new Point(centerX, groundY + 3), heapHalf * 0.96, 4);
+
+        // Irregular mound: a parabolic base with secondary lumps and fine jitter.
+        var heapGeo = new StreamGeometry();
+        using (var hgc = heapGeo.Open())
+        {
+            hgc.BeginFigure(new Point(centerX - heapHalf, groundY), true, true);
+            const int segments = 32;
+            for (var i = 0; i <= segments; i++)
+            {
+                var t = (double)i / segments;
+                var x = centerX - heapHalf + t * heapHalf * 2;
+                var norm = (x - centerX) / heapHalf;
+                var mound = peak * Math.Max(0, 1 - norm * norm);
+                var lumps = Math.Sin(t * Math.PI * 3 + seed * 0.13) * 3.2 * (1 - Math.Abs(norm));
+                var height = Math.Max(0, mound + lumps + Wave(i, seed, 1.6, 2.1));
+                hgc.LineTo(new Point(x, groundY - height), true, true);
+            }
+            hgc.LineTo(new Point(centerX + heapHalf, groundY), true, false);
+        }
+        heapGeo.Freeze();
+        dc.DrawGeometry(Ash, AshStrokePen, heapGeo);
+
+        // Engraved cracks, speckles, and a darker settled base, clipped to the mound.
+        dc.PushClip(heapGeo);
+        var crackPen = new Pen(TobaccoCut, 0.5);
+        for (var x = centerX - heapHalf + 6; x < centerX + heapHalf - 6; x += 8)
+        {
+            dc.DrawLine(crackPen, new Point(x, groundY), new Point(x - 2, groundY - 14));
+            dc.DrawEllipse(TobaccoCut, null, new Point(x + 2, groundY - 6 + Wave((int)x, seed, 3, 0.8)), 0.6, 0.6);
+        }
+        dc.DrawRectangle(AshDark, null, new Rect(centerX - heapHalf, groundY - 4, heapHalf * 2, 6));
+        dc.Pop();
+
+        // A few loose flakes shed around the base.
+        for (var i = 0; i < 4; i++)
+        {
+            var side = i % 2 == 0 ? -1 : 1;
+            var fx = centerX + side * (heapHalf * 0.7 + i * 4);
+            var fy = groundY + 2 + (i % 2) * 3;
+            dc.DrawEllipse(i % 2 == 0 ? Ash : AshDark, null, new Point(fx, fy), 1.4 - i * 0.2, 0.8);
+        }
+
+        // Epitaph caption centred above the heap.
+        var ft = new FormattedText("finis", CultureInfo.InvariantCulture, System.Windows.FlowDirection.LeftToRight,
+            new Typeface(new FontFamily("Cambria"), FontStyles.Italic, FontWeights.Normal, FontStretches.Normal),
+            10, InkFaint, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        dc.DrawText(ft, new Point(centerX - ft.Width / 2, groundY - peak - 22));
     }
 
     private static double Wave(int i, int seed, double amp, double freq)
