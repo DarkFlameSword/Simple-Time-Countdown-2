@@ -88,8 +88,10 @@ public sealed class CigarCountdown : FrameworkElement
     /// <summary>
     /// Fixed seed for the ash outline, its cracks and its speckles, so the drawing is a pure
     /// function of size and progress. It must not be derived from the instance: the list that
-    /// hosts these controls rebuilds its item containers on every one-second refresh, which
-    /// hands each redraw a new object and would make the ash reshuffle instead of holding still.
+    /// hosts these controls discards and rebuilds every item container whenever the collection
+    /// view re-applies its filter — a search keystroke, the archive toggle, adding, editing or
+    /// removing a countdown, or a language switch — which hands the redraw a new object and
+    /// would make the ash reshuffle instead of holding still.
     /// </summary>
     private const int AshShapeSeed = 23;
 

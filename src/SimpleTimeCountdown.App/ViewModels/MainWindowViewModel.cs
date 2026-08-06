@@ -92,7 +92,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             Interval = TimeSpan.FromSeconds(1)
         };
-        _timer.Tick += (_, _) => RefreshCountdowns(forcePersist: false);
+        _timer.Tick += (_, _) => RefreshCountdowns(forcePersist: false, reapplyFilter: false);
         _timer.Start();
 
         _windowBoundsPersistTimer = new DispatcherTimer(DispatcherPriority.Background)
@@ -521,7 +521,18 @@ public sealed class MainWindowViewModel : ObservableObject
         _stateService.Save(_state);
     }
 
-    private void RefreshCountdowns(bool forcePersist)
+    /// <summary>
+    /// Recomputes every countdown against the current time and updates the panel summary.
+    /// </summary>
+    /// <param name="forcePersist">Whether to save state even when nothing requested it.</param>
+    /// <param name="reapplyFilter">
+    /// Whether the collection view must re-evaluate its filter. Refreshing the view raises a
+    /// collection reset, which makes the list discard and rebuild every item container, so the
+    /// once-a-second tick passes false: elapsed time changes bound values only, never which
+    /// countdowns pass the filter. Callers that do change a filter input — the search text, the
+    /// archive toggle, or the set of countdowns — leave it true.
+    /// </param>
+    private void RefreshCountdowns(bool forcePersist, bool reapplyFilter = true)
     {
         var now = DateTimeOffset.Now;
         var selectedZone = OptionCatalog.ResolveTimeZone(DefaultTimeZoneId);
@@ -536,7 +547,11 @@ public sealed class MainWindowViewModel : ObservableObject
             shouldPersist |= TryTriggerNotifications(countdown, now);
         }
 
-        ItemsView.Refresh();
+        if (reapplyFilter)
+        {
+            ItemsView.Refresh();
+        }
+
         var visibleCount = ItemsView.Cast<object>().Count();
         HasVisibleItems = visibleCount > 0;
         SummaryText = _localization.Format("Summary.VisibleTotal", visibleCount, Countdowns.Count);
