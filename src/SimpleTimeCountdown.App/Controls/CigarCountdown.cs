@@ -69,6 +69,18 @@ public sealed class CigarCountdown : FrameworkElement
     private static readonly SolidColorBrush EmberOuter = Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0x7A, 0x1A)));
     private static readonly SolidColorBrush EmberInner = Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0xF3, 0xA0)));
     private static readonly SolidColorBrush EmberRay = Freeze(new SolidColorBrush(Color.FromRgb(0xC8, 0x50, 0x1A)));
+    private static readonly SolidColorBrush EmberDeep = Freeze(new SolidColorBrush(Color.FromRgb(0x8C, 0x24, 0x12)));
+    private static readonly SolidColorBrush EmberDeepCore = Freeze(new SolidColorBrush(Color.FromRgb(0xC2, 0x3A, 0x18)));
+
+    // Relative to each ellipse's bounding box, so one frozen brush serves every ember.
+    private static readonly RadialGradientBrush EmberDeepGlow = Freeze(new RadialGradientBrush
+    {
+        GradientStops =
+        {
+            new GradientStop(Color.FromArgb(0x8C, 0xB0, 0x2A, 0x10), 0),
+            new GradientStop(Color.FromArgb(0x00, 0xB0, 0x2A, 0x10), 1)
+        }
+    });
 
     private static readonly Pen InkPen = Freeze(new Pen(Ink, 1));
     private static readonly Pen HatchPen = Freeze(new Pen(new SolidColorBrush(Color.FromArgb(0x8A, 0x1A, 0x0E, 0x08)), 0.6));
@@ -286,7 +298,7 @@ public sealed class CigarCountdown : FrameworkElement
         }
         else if (burntOut)
         {
-            // Deadline reached: no ember, no smoke — the cigar has collapsed into a cold heap of ash.
+            // Deadline reached: no flame or smoke — the cigar has collapsed into a static heap of ash.
             DrawBurntOutRemains(dc, cigarLeft, cigarRight);
         }
 
@@ -300,9 +312,10 @@ public sealed class CigarCountdown : FrameworkElement
     }
 
     /// <summary>
-    /// Draws the final state once the deadline has passed: a small, cold heap of ash resting
-    /// on the baseline where the cigar used to be, with an engraved "finis" caption. No ember,
-    /// smoke, or halo is drawn here — the burn is over.
+    /// Draws the final state once the deadline has passed: a static heap of ash resting on the
+    /// baseline where the cigar used to be, still smouldering with dark red embers along its
+    /// crest, under an engraved "finis" caption. Nothing here animates, and no flame, smoke,
+    /// or bright ember halo is drawn — the burn is over.
     /// </summary>
     private void DrawBurntOutRemains(DrawingContext dc, double cigarLeft, double cigarRight)
     {
@@ -318,6 +331,7 @@ public sealed class CigarCountdown : FrameworkElement
             new Point(centerX, groundY + 3), heapHalf * 0.96, 4);
 
         // Irregular mound: a parabolic base with secondary lumps and fine jitter.
+        var crest = new List<Point>();
         var heapGeo = new StreamGeometry();
         using (var hgc = heapGeo.Open())
         {
@@ -331,7 +345,9 @@ public sealed class CigarCountdown : FrameworkElement
                 var mound = peak * Math.Max(0, 1 - norm * norm);
                 var lumps = Math.Sin(t * Math.PI * 3 + seed * 0.13) * 3.2 * (1 - Math.Abs(norm));
                 var height = Math.Max(0, mound + lumps + Wave(i, seed, 1.6, 2.1));
-                hgc.LineTo(new Point(x, groundY - height), true, true);
+                var top = new Point(x, groundY - height);
+                crest.Add(top);
+                hgc.LineTo(top, true, true);
             }
             hgc.LineTo(new Point(centerX + heapHalf, groundY), true, false);
         }
@@ -348,6 +364,29 @@ public sealed class CigarCountdown : FrameworkElement
         }
         dc.DrawRectangle(AshDark, null, new Rect(centerX - heapHalf, groundY - 4, heapHalf * 2, 6));
         dc.Pop();
+
+        // Embers still smouldering dark red, bedded just under the crest so they read as coals
+        // buried in the ash rather than beads resting on it. Sizes vary with the same wave the
+        // mound uses, which keeps the spacing from looking mechanical.
+        for (var i = 3; i < crest.Count - 3; i += 4)
+        {
+            var point = crest[i];
+            if (Math.Abs(point.X - centerX) > heapHalf * 0.62)
+            {
+                continue;
+            }
+
+            var bed = new Point(point.X, point.Y + 3);
+            var radius = 1.3 + Math.Abs(Wave(i, seed, 0.9, 1.1));
+            dc.DrawEllipse(EmberDeepGlow, null, bed, radius * 4.2, radius * 3.0);
+            dc.DrawEllipse(EmberDeep, null, bed, radius, radius * 0.66);
+
+            // Only the deepest coals still show a hotter centre.
+            if (radius > 1.9)
+            {
+                dc.DrawEllipse(EmberDeepCore, null, bed, radius * 0.36, radius * 0.24);
+            }
+        }
 
         // A few loose flakes shed around the base.
         for (var i = 0; i < 4; i++)
