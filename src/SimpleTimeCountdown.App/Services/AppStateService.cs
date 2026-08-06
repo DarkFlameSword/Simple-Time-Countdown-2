@@ -9,6 +9,12 @@ public sealed class AppStateService
 {
     private const int MaxCorruptStateBackups = 5;
 
+    // A normal state file is a few KB. These bounds stop a tampered or corrupt file from
+    // hanging startup / exhausting memory: an oversized file is quarantined outright, and an
+    // implausible item count is truncated so the UI thread never materialises millions of cards.
+    private const long MaxStateFileBytes = 8 * 1024 * 1024;
+    private const int MaxItems = 5000;
+
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         WriteIndented = true,
@@ -34,9 +40,25 @@ public sealed class AppStateService
 
         try
         {
+            if (new FileInfo(StateFilePath).Length > MaxStateFileBytes)
+            {
+                QuarantineCorruptStateFile();
+                return CreateDefaultState();
+            }
+
             var json = File.ReadAllText(StateFilePath);
             var state = JsonSerializer.Deserialize<AppState>(json, SerializerOptions);
-            return state ?? CreateDefaultState();
+            if (state is null)
+            {
+                return CreateDefaultState();
+            }
+
+            if (state.Items.Count > MaxItems)
+            {
+                state.Items = state.Items.Take(MaxItems).ToList();
+            }
+
+            return state;
         }
         catch
         {

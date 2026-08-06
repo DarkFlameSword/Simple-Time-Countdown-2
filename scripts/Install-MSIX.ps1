@@ -29,14 +29,15 @@ $certutil = Join-Path $env:SystemRoot 'System32\certutil.exe'
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).
     IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
+# MSIX sideloading of a self-signed package only needs the signing certificate in the
+# TrustedPeople store. The certificate is intentionally NOT added to the Trusted Root
+# Certification Authorities store, which would grant it far broader, machine-wide code-signing trust.
 if ($isAdmin) {
     & $certutil -f -addstore TrustedPeople $certPath | Out-Null
-    & $certutil -f -addstore Root $certPath | Out-Null
 }
 else {
-    Write-Warning 'Running without elevation. Current-user certificate trust will be applied, but some Windows setups still require importing the certificate into the LocalMachine Root store from an elevated PowerShell before MSIX install.'
+    Write-Warning 'Running without elevation. The certificate is being added to the current user''s Trusted People store. If the MSIX install still fails, re-run this script from an elevated PowerShell to add it to the machine-level Trusted People store.'
     & $certutil -user -f -addstore TrustedPeople $certPath | Out-Null
-    & $certutil -user -f -addstore Root $certPath | Out-Null
 }
 
 Add-AppxPackage -Path $msixPath -ErrorAction Stop
