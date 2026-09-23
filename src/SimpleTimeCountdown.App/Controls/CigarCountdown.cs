@@ -1,10 +1,12 @@
 using System.Globalization;
 using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
+using System.Windows.Documents;
 using System.Windows.Media;
 using Brush = System.Windows.Media.Brush;
-using Brushes = System.Windows.Media.Brushes;
 using Color = System.Windows.Media.Color;
-using FontFamily = System.Windows.Media.FontFamily;
 using Pen = System.Windows.Media.Pen;
 using Point = System.Windows.Point;
 using Size = System.Windows.Size;
@@ -20,11 +22,12 @@ public sealed class CigarCountdown : FrameworkElement
 {
     public static readonly DependencyProperty ProgressProperty = DependencyProperty.Register(
         nameof(Progress), typeof(double), typeof(CigarCountdown),
-        new FrameworkPropertyMetadata(0.0, FrameworkPropertyMetadataOptions.AffectsRender, OnVisualChanged, CoerceProgress));
+        new FrameworkPropertyMetadata(0.0, FrameworkPropertyMetadataOptions.AffectsRender, null, CoerceProgress));
 
-    public static readonly DependencyProperty AccentBrushProperty = DependencyProperty.Register(
-        nameof(AccentBrush), typeof(Brush), typeof(CigarCountdown),
-        new FrameworkPropertyMetadata(Brushes.SaddleBrown, FrameworkPropertyMetadataOptions.AffectsRender));
+    /// <summary>Localized caption engraved above the ash heap once the deadline has passed.</summary>
+    public static readonly DependencyProperty BurntOutCaptionProperty = DependencyProperty.Register(
+        nameof(BurntOutCaption), typeof(string), typeof(CigarCountdown),
+        new FrameworkPropertyMetadata("finis", FrameworkPropertyMetadataOptions.AffectsRender));
 
     public double Progress
     {
@@ -32,10 +35,10 @@ public sealed class CigarCountdown : FrameworkElement
         set => SetValue(ProgressProperty, value);
     }
 
-    public Brush AccentBrush
+    public string BurntOutCaption
     {
-        get => (Brush)GetValue(AccentBrushProperty);
-        set => SetValue(AccentBrushProperty, value);
+        get => (string)GetValue(BurntOutCaptionProperty);
+        set => SetValue(BurntOutCaptionProperty, value);
     }
 
     private static object CoerceProgress(DependencyObject d, object baseValue)
@@ -46,10 +49,11 @@ public sealed class CigarCountdown : FrameworkElement
         return v;
     }
 
-    private static void OnVisualChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-    {
-        ((CigarCountdown)d).InvalidateVisual();
-    }
+    /// <summary>
+    /// Exposes the cigar to UI Automation as a read-only progress bar (0–100 % elapsed), named by
+    /// AutomationProperties.Name, so screen readers get the value the drawing shows.
+    /// </summary>
+    protected override AutomationPeer OnCreateAutomationPeer() => new CigarCountdownAutomationPeer(this);
 
     protected override Size MeasureOverride(Size availableSize)
     {
@@ -58,7 +62,7 @@ public sealed class CigarCountdown : FrameworkElement
     }
 
     private static readonly SolidColorBrush Ink = Freeze(new SolidColorBrush(Color.FromRgb(0x2A, 0x1A, 0x10)));
-    private static readonly SolidColorBrush InkFaint = Freeze(new SolidColorBrush(Color.FromRgb(0x7A, 0x5A, 0x40)));
+    private static readonly SolidColorBrush InkFaint = Freeze(new SolidColorBrush(Color.FromRgb(0x5E, 0x43, 0x30)));
     private static readonly SolidColorBrush TobaccoBody = Freeze(new SolidColorBrush(Color.FromRgb(0x5A, 0x3A, 0x1C)));
     private static readonly SolidColorBrush TobaccoDark = Freeze(new SolidColorBrush(Color.FromRgb(0x3A, 0x26, 0x16)));
     private static readonly SolidColorBrush TobaccoCut = Freeze(new SolidColorBrush(Color.FromRgb(0x1A, 0x0E, 0x08)));
@@ -68,7 +72,6 @@ public sealed class CigarCountdown : FrameworkElement
     private static readonly SolidColorBrush GoldBandDark = Freeze(new SolidColorBrush(Color.FromRgb(0x5A, 0x3A, 0x10)));
     private static readonly SolidColorBrush EmberOuter = Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0x7A, 0x1A)));
     private static readonly SolidColorBrush EmberInner = Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0xF3, 0xA0)));
-    private static readonly SolidColorBrush EmberRay = Freeze(new SolidColorBrush(Color.FromRgb(0xC8, 0x50, 0x1A)));
 
     private static readonly Pen InkPen = Freeze(new Pen(Ink, 1));
     private static readonly Pen HatchPen = Freeze(new Pen(new SolidColorBrush(Color.FromArgb(0x8A, 0x1A, 0x0E, 0x08)), 0.6));
@@ -82,6 +85,31 @@ public sealed class CigarCountdown : FrameworkElement
     private static readonly Pen SmokePenThick = Freeze(new Pen(new SolidColorBrush(Color.FromArgb(0xB3, 0x2A, 0x1A, 0x10)), 1.2));
     private static readonly Pen SmokePenThin = Freeze(new Pen(new SolidColorBrush(Color.FromArgb(0x73, 0x2A, 0x1A, 0x10)), 0.9));
     private static readonly Pen SmokePenWisp = Freeze(new Pen(new SolidColorBrush(Color.FromArgb(0x52, 0x2A, 0x1A, 0x10)), 0.7));
+    private static readonly Pen CutLeafPen = Freeze(new Pen(TobaccoCut, 0.5) { DashStyle = DashStyles.Dot });
+    private static readonly Pen CrackPen = Freeze(new Pen(TobaccoCut, 0.5));
+    private static readonly Pen BandPen = Freeze(new Pen(Ink, 0.8));
+    private static readonly SolidColorBrush HeapShadow = Freeze(new SolidColorBrush(Color.FromArgb(0x2A, 0x2A, 0x1A, 0x10)));
+    private static readonly Brush[] FallingFlakes =
+    [
+        Freeze(new SolidColorBrush(Color.FromArgb(180, 0x8A, 0x7A, 0x64))),
+        Freeze(new SolidColorBrush(Color.FromArgb(140, 0x8A, 0x7A, 0x64))),
+        Freeze(new SolidColorBrush(Color.FromArgb(100, 0x8A, 0x7A, 0x64)))
+    ];
+    private static readonly Brush EmberHalo = Freeze(new RadialGradientBrush
+    {
+        GradientStops =
+        {
+            new GradientStop(Color.FromArgb(0xC8, 0xFF, 0x7A, 0x1A), 0),
+            new GradientStop(Color.FromArgb(0x00, 0xFF, 0x7A, 0x1A), 1)
+        }
+    });
+    // Engraving rays around the ember, faintest at the outside: indexed by distance from centre.
+    private static readonly Pen[] EmberRayPens =
+    [
+        Freeze(new Pen(new SolidColorBrush(Color.FromArgb(0xCC, 0xC8, 0x50, 0x1A)), 0.7)),
+        Freeze(new Pen(new SolidColorBrush(Color.FromArgb(0x99, 0xC8, 0x50, 0x1A)), 0.7)),
+        Freeze(new Pen(new SolidColorBrush(Color.FromArgb(0x66, 0xC8, 0x50, 0x1A)), 0.7))
+    ];
 
     private static T Freeze<T>(T f) where T : Freezable { f.Freeze(); return f; }
 
@@ -133,7 +161,7 @@ public sealed class CigarCountdown : FrameworkElement
             for (var i = 0; i < 4; i++)
             {
                 var ly = cigarTop + 4 + i * 4.4;
-                dc.DrawLine(new Pen(TobaccoCut, 0.5) { DashStyle = DashStyles.Dot }, new Point(cigarLeft - 4, ly), new Point(cigarLeft + 3, ly));
+                dc.DrawLine(CutLeafPen, new Point(cigarLeft - 4, ly), new Point(cigarLeft + 3, ly));
             }
         }
 
@@ -174,7 +202,7 @@ public sealed class CigarCountdown : FrameworkElement
         if (ashStartX > cigarLeft + 30)
         {
             var bandRect = new Rect(cigarLeft + 14, cigarTop - 1, 22, cigarHeight + 2);
-            dc.DrawRectangle(GoldBand, new Pen(Ink, 0.8), bandRect);
+            dc.DrawRectangle(GoldBand, BandPen, bandRect);
             dc.DrawLine(GoldStrokePen, new Point(bandRect.X + 2, bandRect.Y + 1), new Point(bandRect.X + 2, bandRect.Bottom - 1));
             dc.DrawLine(GoldStrokePen, new Point(bandRect.Right - 2, bandRect.Y + 1), new Point(bandRect.Right - 2, bandRect.Bottom - 1));
             var center = new Point(bandRect.X + bandRect.Width / 2, (cigarTop + cigarBot) / 2);
@@ -213,7 +241,7 @@ public sealed class CigarCountdown : FrameworkElement
             // crack lines
             for (double x = ashStartX + 6; x < cigarRight - 4; x += 14)
             {
-                dc.DrawLine(new Pen(TobaccoCut, 0.5), new Point(x, cigarTop + 4), new Point(x + 1, cigarBot - 4));
+                dc.DrawLine(CrackPen, new Point(x, cigarTop + 4), new Point(x + 1, cigarBot - 4));
             }
             // speckles
             for (double x = ashStartX + 4; x < cigarRight - 2; x += 5)
@@ -229,7 +257,7 @@ public sealed class CigarCountdown : FrameworkElement
                     var fx = ashStartX + 6 + i * 9;
                     var fy = cigarBot + 6 + i * 4;
                     var fr = 2.6 - i * 0.7;
-                    dc.DrawEllipse(new SolidColorBrush(Color.FromArgb((byte)(180 - i * 40), 0x8A, 0x7A, 0x64)) { Opacity = 1 }, null, new Point(fx, fy), fr, fr * 0.5);
+                    dc.DrawEllipse(FallingFlakes[i], null, new Point(fx, fy), fr, fr * 0.5);
                 }
             }
         }
@@ -238,25 +266,14 @@ public sealed class CigarCountdown : FrameworkElement
         if (progress > 0 && progress < 1)
         {
             // outer halo
-            var halo = new RadialGradientBrush
-            {
-                GradientStops =
-                {
-                    new GradientStop(Color.FromArgb(0xC8, 0xFF, 0x7A, 0x1A), 0),
-                    new GradientStop(Color.FromArgb(0x00, 0xFF, 0x7A, 0x1A), 1)
-                }
-            };
-            halo.Freeze();
-            dc.DrawEllipse(halo, null, new Point(ashStartX, (cigarTop + cigarBot) / 2), 14, 9);
+            dc.DrawEllipse(EmberHalo, null, new Point(ashStartX, (cigarTop + cigarBot) / 2), 14, 9);
             dc.DrawEllipse(EmberOuter, null, new Point(ashStartX, (cigarTop + cigarBot) / 2), 3, 10);
             dc.DrawEllipse(EmberInner, null, new Point(ashStartX, (cigarTop + cigarBot) / 2), 1.5, 8);
 
             // radiating engraving rays
             for (var k = -2; k <= 2; k++)
             {
-                var alpha = (byte)(0xCC - Math.Abs(k) * 0x33);
-                var rayPen = new Pen(new SolidColorBrush(Color.FromArgb(alpha, 0xC8, 0x50, 0x1A)), 0.7);
-                rayPen.Freeze();
+                var rayPen = EmberRayPens[Math.Abs(k)];
                 dc.DrawLine(rayPen, new Point(ashStartX + k * 1.6, cigarTop - 4), new Point(ashStartX + k * 2.6, cigarTop - 9));
                 dc.DrawLine(rayPen, new Point(ashStartX + k * 1.6, cigarBot + 4), new Point(ashStartX + k * 2.6, cigarBot + 9));
             }
@@ -323,7 +340,7 @@ public sealed class CigarCountdown : FrameworkElement
         var heapHalf = Math.Min(72, cigarLen * 0.26);
 
         // Soft cast shadow grounding the heap.
-        dc.DrawEllipse(new SolidColorBrush(Color.FromArgb(0x2A, 0x2A, 0x1A, 0x10)), null,
+        dc.DrawEllipse(HeapShadow, null,
             new Point(centerX, groundY + 3), heapHalf * 0.96, 4);
 
         // Irregular mound: a parabolic base with secondary lumps and fine jitter.
@@ -349,10 +366,9 @@ public sealed class CigarCountdown : FrameworkElement
 
         // Engraved cracks, speckles, and a darker settled base, clipped to the mound.
         dc.PushClip(heapGeo);
-        var crackPen = new Pen(TobaccoCut, 0.5);
         for (var x = centerX - heapHalf + 6; x < centerX + heapHalf - 6; x += 8)
         {
-            dc.DrawLine(crackPen, new Point(x, groundY), new Point(x - 2, groundY - 14));
+            dc.DrawLine(CrackPen, new Point(x, groundY), new Point(x - 2, groundY - 14));
             dc.DrawEllipse(TobaccoCut, null, new Point(x + 2, groundY - 6 + Wave((int)x, AshShapeSeed, 3, 0.8)), 0.6, 0.6);
         }
         dc.DrawRectangle(AshDark, null, new Rect(centerX - heapHalf, groundY - 4, heapHalf * 2, 6));
@@ -368,9 +384,11 @@ public sealed class CigarCountdown : FrameworkElement
         }
 
         // Epitaph caption centred above the heap.
-        var ft = new FormattedText("finis", CultureInfo.InvariantCulture, System.Windows.FlowDirection.LeftToRight,
-            new Typeface(new FontFamily("Cambria"), FontStyles.Italic, FontWeights.Normal, FontStretches.Normal),
-            10, InkFaint, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        // Uses the inherited theme font so the caption matches the card around it; 12 DIP is the
+        // design system's minimum text size.
+        var ft = new FormattedText(BurntOutCaption ?? string.Empty, CultureInfo.CurrentUICulture, System.Windows.FlowDirection.LeftToRight,
+            new Typeface(TextElement.GetFontFamily(this), FontStyles.Italic, FontWeights.Normal, FontStretches.Normal),
+            12, InkFaint, VisualTreeHelper.GetDpi(this).PixelsPerDip);
         dc.DrawText(ft, new Point(centerX - ft.Width / 2, groundY - peak - 22));
     }
 
@@ -378,4 +396,36 @@ public sealed class CigarCountdown : FrameworkElement
     {
         return Math.Sin((i * 1.7 + seed * 0.13) * freq) * amp;
     }
+}
+
+internal sealed class CigarCountdownAutomationPeer(CigarCountdown owner) : FrameworkElementAutomationPeer(owner), IRangeValueProvider
+{
+    private CigarCountdown Cigar => (CigarCountdown)Owner;
+
+    public bool IsReadOnly => true;
+
+    public double LargeChange => 10;
+
+    public double SmallChange => 1;
+
+    public double Maximum => 100;
+
+    public double Minimum => 0;
+
+    public double Value => Math.Round(Cigar.Progress * 100, 1);
+
+    public void SetValue(double value) => throw new ElementNotEnabledException();
+
+    public override object? GetPattern(PatternInterface patternInterface)
+    {
+        return patternInterface == PatternInterface.RangeValue ? this : base.GetPattern(patternInterface);
+    }
+
+    protected override AutomationControlType GetAutomationControlTypeCore() => AutomationControlType.ProgressBar;
+
+    protected override string GetClassNameCore() => nameof(CigarCountdown);
+
+    protected override bool IsContentElementCore() => true;
+
+    protected override bool IsControlElementCore() => true;
 }

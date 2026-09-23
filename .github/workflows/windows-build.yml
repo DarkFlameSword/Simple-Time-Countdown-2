@@ -6,25 +6,129 @@ on:
       - main
       - master
   pull_request:
+  workflow_dispatch:
 
+# Least privilege: every job only reads the repository. Artifact uploads use the runner's own token.
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
 jobs:
   build:
+    name: Build and test
     runs-on: windows-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Don't leave the token in .git/config while MSBuild runs code from the pull request.
+          persist-credentials: false
 
       - name: Setup .NET
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
-          dotnet-version: 8.0.x
+          global-json-file: global.json
+
+      - name: Check the release scripts parse
+        shell: powershell
+        run: |
+          $failed = $false
+          foreach ($script in Get-ChildItem scripts -Filter *.ps1) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($script.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            foreach ($parseError in $errors) {
+              Write-Host "::error file=scripts/$($script.Name),line=$($parseError.Extent.StartLineNumber)::$($parseError.Message)"
+              $failed = $true
+            }
+          }
+          if ($failed) { exit 1 }
 
       - name: Restore
         run: dotnet restore SimpleTimeCountdown.sln
 
       - name: Build
         run: dotnet build SimpleTimeCountdown.sln --configuration Release --no-restore
+
+      # Runs whatever test projects the solution contains; with none it succeeds without output.
+      - name: Test
+        run: dotnet test SimpleTimeCountdown.sln --configuration Release --no-build --logger trx --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-results
+          path: TestResults
+          if-no-files-found: ignore
+          retention-days: 7
+
+  package:
+    name: Packaging smoke test
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          global-json-file: global.json
+
+      - name: Verify the brand assets
+        shell: powershell
+        run: .\scripts\Generate-AppAssets.ps1 -Verify
+
+      # The same script releases are built with, minus signing: it publishes the portable zip and builds
+      # Setup.exe with that zip appended as its payload, failing unless the payload really is in it.
+      - name: Build the portable zip and Setup.exe (unsigned)
+        shell: powershell
+        run: .\scripts\Build-SetupExe.ps1 -Configuration Release -RuntimeIdentifier win-x64
+
+      # Installs Setup.exe silently for the runner's user (a throwaway VM), reinstalls over it and
+      # uninstalls through the Settings > Apps command, checking the installed files, shortcuts,
+      # registration and the cleanup that runs after the uninstaller exits.
+      - name: Install, reinstall and uninstall Setup.exe
+        shell: powershell
+        run: .\scripts\Test-SetupExe.ps1 -Configuration Release -RuntimeIdentifier win-x64
+
+      # makeappx validates the filled-in manifest and makepri indexes the logos; the runner image
+      # includes the Windows SDK both come from.
+      - name: Build the MSIX (unsigned)
+        shell: powershell
+        run: .\scripts\Publish-MSIX.ps1 -Configuration Release -RuntimeIdentifier win-x64
+
+      - name: Upload packages
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: packages-win-x64-unsigned
+          path: |
+            artifacts/packages/SimpleTimeCountdown-Release-win-x64-portable.zip
+            artifacts/packages/SimpleTimeCountdown-Setup-win-x64.exe
+            artifacts/packages/SimpleTimeCountdown_*_win-x64.msix
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload the Setup logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: setup-smoke-logs
+          path: artifacts/test-results/setup
+          if-no-files-found: ignore
+          retention-days: 7

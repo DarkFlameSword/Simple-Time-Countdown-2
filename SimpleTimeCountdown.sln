@@ -9,6 +9,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SimpleTimeCountdown.App", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SimpleTimeCountdown.Setup", "src\SimpleTimeCountdown.Setup\SimpleTimeCountdown.Setup.csproj", "{11A75A2A-AAB1-45FF-89E5-EB65F4507B0A}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{2643F150-C374-4795-A7FC-4B087987252D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SimpleTimeCountdown.Tests", "tests\SimpleTimeCountdown.Tests\SimpleTimeCountdown.Tests.csproj", "{7BD61D31-EDBC-413F-B18B-665DF0D7D721}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -26,9 +30,14 @@ Global
 		{11A75A2A-AAB1-45FF-89E5-EB65F4507B0A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{11A75A2A-AAB1-45FF-89E5-EB65F4507B0A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{11A75A2A-AAB1-45FF-89E5-EB65F4507B0A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7BD61D31-EDBC-413F-B18B-665DF0D7D721}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7BD61D31-EDBC-413F-B18B-665DF0D7D721}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7BD61D31-EDBC-413F-B18B-665DF0D7D721}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7BD61D31-EDBC-413F-B18B-665DF0D7D721}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{CE66CF17-5F1B-439F-A552-5A62CEEBB67F} = {BFDACBF1-0B62-4498-A506-16D5DF7BD8D5}
 		{11A75A2A-AAB1-45FF-89E5-EB65F4507B0A} = {BFDACBF1-0B62-4498-A506-16D5DF7BD8D5}
+		{7BD61D31-EDBC-413F-B18B-665DF0D7D721} = {2643F150-C374-4795-A7FC-4B087987252D}
 	EndGlobalSection
 EndGlobal

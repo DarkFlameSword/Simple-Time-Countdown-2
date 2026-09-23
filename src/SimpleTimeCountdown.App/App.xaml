@@ -7,13 +7,11 @@
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="/Themes/VictorianTheme.xaml" />
+                <ResourceDictionary Source="/TimeCountdown;component/Themes/VictorianTheme.xaml" />
             </ResourceDictionary.MergedDictionaries>
 
             <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
             <converters:InverseBooleanToVisibilityConverter x:Key="InverseBooleanToVisibilityConverter" />
-            <converters:BooleanInverterConverter x:Key="BooleanInverterConverter" />
-            <converters:RomanDateConverter x:Key="RomanDateConverter" />
             <x:Static Member="services:LocalizationService.Instance" x:Key="Loc" />
         </ResourceDictionary>
     </Application.Resources>

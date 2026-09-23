@@ -1,22 +1,35 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
 using System.Windows.Data;
 using System.Windows.Threading;
+using Microsoft.Win32;
 using TimeCountdown.Models;
 using TimeCountdown.Services;
 
 namespace TimeCountdown.ViewModels;
 
-public sealed class MainWindowViewModel : ObservableObject
+public sealed class MainWindowViewModel : ObservableObject, IDisposable
 {
+    public const double MinPanelOpacity = 0.85;
+    public const double MaxPanelOpacity = 1.0;
+
+    // Settings changes are coalesced into one write after this idle period, so dragging a
+    // slider saves once instead of on every step. A failed write retries on the slower interval.
+    private static readonly TimeSpan PersistDelay = TimeSpan.FromMilliseconds(400);
+    private static readonly TimeSpan PersistRetryDelay = TimeSpan.FromSeconds(10);
+    private const int MaxNotificationTitleLength = 60;
+
     private readonly AppState _state;
     private readonly AppStateService _stateService;
     private readonly IAutostartService _autostartService;
     private readonly DispatcherTimer _timer;
-    private readonly DispatcherTimer _windowBoundsPersistTimer;
+    private readonly DispatcherTimer _persistTimer;
     private readonly LocalizationService _localization = LocalizationService.Instance;
-    private IReadOnlyList<ReminderOption> _reminderOptions = [];
-    private IReadOnlyList<TimeZoneOption> _timeZoneOptions = [];
+    private IReadOnlyList<ReminderOption> _reminderOptions;
+    private IReadOnlyList<TimeZoneOption> _timeZoneOptions;
+    private CountdownThresholds _thresholds;
     private string _searchText = string.Empty;
     private bool _showArchivedOnly;
     private bool _alwaysOnTop;
@@ -25,16 +38,16 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _desktopLayerEnabled;
     private double _panelOpacity;
     private int _defaultReminderMinutesBefore;
-    private string _defaultTimeZoneId = TimeZoneInfo.Local.Id;
-    private int _todayThresholdDays = 1;
-    private int _soonThresholdDays = 7;
-    private int _safeThresholdDays = 8;
-    private IReadOnlyList<LanguageOption> _languageOptions = [];
-    private string _selectedLanguageCode = "en";
+    private string _defaultTimeZoneId;
+    private string _selectedLanguageCode;
     private bool _hasVisibleItems;
     private string _summaryText = string.Empty;
+    private string _emptyStateText = string.Empty;
     private string _currentTimeDisplay = string.Empty;
-    private bool _isInitializing = true;
+    private bool _hasSaveError;
+    private bool _isDirty;
+    private bool _started;
+    private bool _disposed;
 
     public MainWindowViewModel(AppState state, AppStateService stateService, IAutostartService autostartService)
     {
@@ -42,69 +55,58 @@ public sealed class MainWindowViewModel : ObservableObject
         _stateService = stateService;
         _autostartService = autostartService;
 
-        var initialLanguage = string.IsNullOrWhiteSpace(state.Settings.LanguageCode) ? "en" : state.Settings.LanguageCode;
-        _localization.SetLanguage(initialLanguage);
+        _localization.SetLanguage(state.Settings.LanguageCode);
         _selectedLanguageCode = _localization.CurrentLanguageCode;
 
         _reminderOptions = OptionCatalog.GetReminderOptions();
         _timeZoneOptions = OptionCatalog.GetTimeZoneOptions(_localization.CurrentLanguageCode);
-        _languageOptions = BuildLanguageOptions();
 
-        Countdowns = [];
-        foreach (var item in state.Items)
-        {
-            Countdowns.Add(new CountdownItemViewModel(item));
-        }
-
+        Countdowns = new ObservableCollection<CountdownItemViewModel>(
+            state.Items.Select(static item => new CountdownItemViewModel(item)));
         ItemsView = CollectionViewSource.GetDefaultView(Countdowns);
         ItemsView.Filter = FilterCountdown;
 
-        _alwaysOnTop = state.Settings.AlwaysOnTop;
-        _panelOpacity = Math.Clamp(state.Settings.PanelOpacity, 0.72, 1.00);
-        _showArchivedOnly = state.Settings.ShowArchivedOnly;
-        _launchAtStartup = _autostartService.IsEnabled();
-        _hideOnCloseToTray = state.Settings.HideOnCloseToTray;
-        _desktopLayerEnabled = state.Settings.DesktopLayerEnabled;
-        _defaultReminderMinutesBefore = _reminderOptions.Any(option => option.Minutes == state.Settings.DefaultReminderMinutesBefore)
-            ? state.Settings.DefaultReminderMinutesBefore
-            : _reminderOptions.First().Minutes;
-        _defaultTimeZoneId = _timeZoneOptions.Any(option => option.Id == state.Settings.DefaultTimeZoneId)
-            ? state.Settings.DefaultTimeZoneId
+        var settings = state.Settings;
+        _alwaysOnTop = settings.AlwaysOnTop && !settings.DesktopLayerEnabled;
+        _desktopLayerEnabled = settings.DesktopLayerEnabled;
+        _panelOpacity = ClampOpacity(settings.PanelOpacity);
+        _showArchivedOnly = settings.ShowArchivedOnly;
+        _hideOnCloseToTray = settings.HideOnCloseToTray;
+        _launchAtStartup = SafeIsAutostartEnabled();
+        _defaultReminderMinutesBefore = _reminderOptions.Any(option => option.Minutes == settings.DefaultReminderMinutesBefore)
+            ? settings.DefaultReminderMinutesBefore
+            : _reminderOptions[0].Minutes;
+        _defaultTimeZoneId = _timeZoneOptions.Any(option => option.Id == settings.DefaultTimeZoneId)
+            ? settings.DefaultTimeZoneId
             : TimeZoneInfo.Local.Id;
-        ApplyThresholds(
-            state.Settings.TodayThresholdDays,
-            state.Settings.SoonThresholdDays,
-            state.Settings.SafeThresholdDays,
-            persist: false);
-        _state.Settings.LaunchAtStartup = _launchAtStartup;
-        _state.Settings.LanguageCode = _selectedLanguageCode;
+        _thresholds = CountdownThresholds.Normalize(settings.TodayThresholdDays, settings.SafeThresholdDays);
+        WriteSettingsToState();
 
         _localization.PropertyChanged += LocalizationOnPropertyChanged;
+        ThemeService.HighContrastChanged += ThemeServiceOnHighContrastChanged;
+        SystemEvents.TimeChanged += SystemEventsOnTimeChanged;
 
         SortCountdowns();
-        RefreshCountdowns(forcePersist: false);
+        // The first pass only renders. Notifications wait for Start(), so reminders that fell due
+        // while the app was closed are shown once a listener is attached instead of being
+        // marked as shown before anyone could see them.
+        RefreshCountdowns(notify: false);
 
-        _timer = new DispatcherTimer(DispatcherPriority.Background)
-        {
-            Interval = TimeSpan.FromSeconds(1)
-        };
-        _timer.Tick += (_, _) => RefreshCountdowns(forcePersist: false, reapplyFilter: false);
-        _timer.Start();
+        _timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(1) };
+        _timer.Tick += (_, _) => RefreshCountdowns(notify: true, reapplyFilter: false);
 
-        _windowBoundsPersistTimer = new DispatcherTimer(DispatcherPriority.Background)
-        {
-            Interval = TimeSpan.FromMilliseconds(500)
-        };
-        _windowBoundsPersistTimer.Tick += WindowBoundsPersistTimerOnTick;
-
-        _isInitializing = false;
+        _persistTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = PersistDelay };
+        _persistTimer.Tick += PersistTimerOnTick;
     }
 
+    /// <summary>Raised on the UI thread for each reminder, or once for a batch that fell due together.</summary>
     public event EventHandler<CountdownNotificationEventArgs>? NotificationRequested;
 
     public ObservableCollection<CountdownItemViewModel> Countdowns { get; }
 
     public ICollectionView ItemsView { get; }
+
+    public AppSettings Settings => _state.Settings;
 
     public IReadOnlyList<ReminderOption> ReminderOptions
     {
@@ -118,25 +120,16 @@ public sealed class MainWindowViewModel : ObservableObject
         private set => SetProperty(ref _timeZoneOptions, value);
     }
 
-    public IReadOnlyList<LanguageOption> LanguageOptions
-    {
-        get => _languageOptions;
-        private set => SetProperty(ref _languageOptions, value);
-    }
-
-    public AppSettings Settings => _state.Settings;
-
     public string SearchText
     {
         get => _searchText;
         set
         {
-            if (!SetProperty(ref _searchText, value))
+            var bounded = value is { Length: > TextInput.MaxSearchLength } ? value[..TextInput.MaxSearchLength] : value ?? string.Empty;
+            if (SetProperty(ref _searchText, bounded))
             {
-                return;
+                RefreshCountdowns(notify: false);
             }
-
-            RefreshCountdowns(forcePersist: false);
         }
     }
 
@@ -151,24 +144,17 @@ public sealed class MainWindowViewModel : ObservableObject
             }
 
             _state.Settings.ShowArchivedOnly = value;
-            OnPropertyChanged(nameof(ArchiveViewGlyph));
-            OnPropertyChanged(nameof(ArchiveViewTooltipText));
-            RefreshCountdowns(forcePersist: true);
+            OnPropertyChanged(nameof(ArchiveToggleText));
+            RefreshCountdowns(notify: false);
+            RequestPersist();
         }
     }
 
-    public string ArchiveViewGlyph => "\uE8A5";
+    /// <summary>Tooltip and accessible name of the archive toggle, describing what it will do.</summary>
+    public string ArchiveToggleText => _localization[ShowArchivedOnly ? "Main.Button.HideArchive" : "Main.Button.ShowArchive"];
 
-    public string ArchiveViewTooltipText
-    {
-        get
-        {
-            var zh = string.Equals(_localization.CurrentLanguageCode, "zh-CN", StringComparison.OrdinalIgnoreCase);
-            return ShowArchivedOnly
-                ? (zh ? "返回主列表" : "Back to main list")
-                : (zh ? "仅显示已归档卡片" : "Show archived cards only");
-        }
-    }
+    /// <summary>Tooltip and accessible name of the chrome close button, which follows the tray setting.</summary>
+    public string CloseButtonText => _localization[HideOnCloseToTray ? "Main.Button.CloseToTray" : "Main.Button.Exit"];
 
     public bool AlwaysOnTop
     {
@@ -180,39 +166,14 @@ public sealed class MainWindowViewModel : ObservableObject
                 return;
             }
 
+            // The two presentation modes are exclusive whichever one is switched on.
+            if (value && DesktopLayerEnabled)
+            {
+                DesktopLayerEnabled = false;
+            }
+
             _state.Settings.AlwaysOnTop = value;
-            Persist();
-        }
-    }
-
-    public bool LaunchAtStartup
-    {
-        get => _launchAtStartup;
-        set
-        {
-            if (!SetProperty(ref _launchAtStartup, value))
-            {
-                return;
-            }
-
-            _autostartService.SetEnabled(value);
-            _state.Settings.LaunchAtStartup = value;
-            Persist();
-        }
-    }
-
-    public bool HideOnCloseToTray
-    {
-        get => _hideOnCloseToTray;
-        set
-        {
-            if (!SetProperty(ref _hideOnCloseToTray, value))
-            {
-                return;
-            }
-
-            _state.Settings.HideOnCloseToTray = value;
-            Persist();
+            RequestPersist();
         }
     }
 
@@ -226,14 +187,58 @@ public sealed class MainWindowViewModel : ObservableObject
                 return;
             }
 
-            _state.Settings.DesktopLayerEnabled = value;
             if (value && AlwaysOnTop)
             {
                 AlwaysOnTop = false;
+            }
+
+            _state.Settings.DesktopLayerEnabled = value;
+            RequestPersist();
+        }
+    }
+
+    public bool LaunchAtStartup
+    {
+        get => _launchAtStartup;
+        set
+        {
+            if (_launchAtStartup == value)
+            {
                 return;
             }
 
-            Persist();
+            try
+            {
+                _autostartService.SetEnabled(value);
+                _launchAtStartup = value;
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or IOException)
+            {
+                AppLog.Warn("Changing the autostart registration failed.", ex);
+                StatusMessageRequested?.Invoke(this, _localization["Error.AutostartFailed"]);
+            }
+
+            // Raised in both cases so a refused change snaps the check box back.
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>True for the MSIX build, whose autostart only Windows Settings can change.</summary>
+    public bool IsPackaged => PackageInfo.IsPackaged;
+
+    public bool HideOnCloseToTray
+    {
+        get => _hideOnCloseToTray;
+        set
+        {
+            if (!SetProperty(ref _hideOnCloseToTray, value))
+            {
+                return;
+            }
+
+            _state.Settings.HideOnCloseToTray = value;
+            OnPropertyChanged(nameof(CloseButtonText));
+            RequestPersist();
         }
     }
 
@@ -242,34 +247,35 @@ public sealed class MainWindowViewModel : ObservableObject
         get => _panelOpacity;
         set
         {
-            var clamped = Math.Clamp(value, 0.72, 1.00);
-            if (!SetProperty(ref _panelOpacity, clamped))
+            if (!SetProperty(ref _panelOpacity, ClampOpacity(value)))
             {
                 return;
             }
 
-            _state.Settings.PanelOpacity = clamped;
-            Persist();
+            _state.Settings.PanelOpacity = _panelOpacity;
+            OnPropertyChanged(nameof(EffectivePanelOpacity));
+            RequestPersist();
         }
     }
+
+    /// <summary>The opacity actually applied: always opaque under a Windows contrast theme.</summary>
+    public double EffectivePanelOpacity => IsHighContrast ? 1.0 : PanelOpacity;
+
+    public bool IsHighContrast => ThemeService.IsHighContrast;
 
     public int DefaultReminderMinutesBefore
     {
         get => _defaultReminderMinutesBefore;
         set
         {
-            if (!ReminderOptions.Any(option => option.Minutes == value))
-            {
-                value = ReminderOptions.First().Minutes;
-            }
-
-            if (!SetProperty(ref _defaultReminderMinutesBefore, value))
+            if (!ReminderOptions.Any(option => option.Minutes == value) ||
+                !SetProperty(ref _defaultReminderMinutesBefore, value))
             {
                 return;
             }
 
             _state.Settings.DefaultReminderMinutesBefore = value;
-            Persist();
+            RequestPersist();
         }
     }
 
@@ -278,19 +284,18 @@ public sealed class MainWindowViewModel : ObservableObject
         get => _defaultTimeZoneId;
         set
         {
-            if (!TimeZoneOptions.Any(option => option.Id == value))
-            {
-                value = TimeZoneInfo.Local.Id;
-            }
-
-            if (!SetProperty(ref _defaultTimeZoneId, value))
+            // A ComboBox pushes null while its ItemsSource is being replaced (for example on a
+            // language switch); that is not a user choice and must not reset the zone.
+            if (string.IsNullOrWhiteSpace(value) ||
+                !TimeZoneOptions.Any(option => option.Id == value) ||
+                !SetProperty(ref _defaultTimeZoneId, value))
             {
                 return;
             }
 
             _state.Settings.DefaultTimeZoneId = value;
-            Persist();
-            RefreshCountdowns(forcePersist: false);
+            RefreshCountdowns(notify: false, reapplyFilter: false);
+            RequestPersist();
         }
     }
 
@@ -299,40 +304,82 @@ public sealed class MainWindowViewModel : ObservableObject
         get => _selectedLanguageCode;
         set
         {
-            var normalized = value == "zh-CN" ? "zh-CN" : "en";
+            var normalized = LocalizationService.NormalizeLanguageCode(value);
             if (!SetProperty(ref _selectedLanguageCode, normalized))
             {
                 return;
             }
 
             _state.Settings.LanguageCode = normalized;
+            OnPropertyChanged(nameof(IsEnglishSelected));
+            OnPropertyChanged(nameof(IsChineseSelected));
             _localization.SetLanguage(normalized);
-            Persist();
+            RequestPersist();
         }
     }
 
-    public int TodayThresholdDays
+    public bool IsEnglishSelected
     {
-        get => _todayThresholdDays;
-        set => ApplyThresholds(value, _soonThresholdDays, _safeThresholdDays, persist: true);
+        get => SelectedLanguageCode == LocalizationService.English;
+        set
+        {
+            if (value)
+            {
+                SelectedLanguageCode = LocalizationService.English;
+            }
+        }
     }
 
-    public int SoonThresholdDays
+    public bool IsChineseSelected
     {
-        get => _soonThresholdDays;
-        set => ApplyThresholds(_todayThresholdDays, value, _safeThresholdDays, persist: true);
+        get => SelectedLanguageCode == LocalizationService.Chinese;
+        set
+        {
+            if (value)
+            {
+                SelectedLanguageCode = LocalizationService.Chinese;
+            }
+        }
     }
 
-    public int SafeThresholdDays
+    public int MinPerilousThresholdDays => CountdownThresholds.MinPerilousDays;
+
+    public int MaxPerilousThresholdDays => CountdownThresholds.MaxPerilousDays;
+
+    public int MaxUrgentThresholdDays => CountdownThresholds.MaxUrgentDays;
+
+    /// <summary>Countdowns due within this many days are Perilous.</summary>
+    public int PerilousThresholdDays
     {
-        get => _safeThresholdDays;
-        set => ApplyThresholds(_todayThresholdDays, _soonThresholdDays, value, persist: true);
+        get => _thresholds.PerilousDays;
+        set => ApplyThresholds(CountdownThresholds.Normalize(value, Math.Max(_thresholds.UrgentDays, value + 1)));
     }
+
+    /// <summary>Countdowns due within this many days (and not Perilous) are Urgent.</summary>
+    public int UrgentThresholdDays
+    {
+        get => _thresholds.UrgentDays;
+        set => ApplyThresholds(CountdownThresholds.Normalize(_thresholds.PerilousDays, value));
+    }
+
+    /// <summary>The smallest Urgent limit allowed, one day past the Perilous limit.</summary>
+    public int MinUrgentThresholdDays => _thresholds.PerilousDays + 1;
+
+    public string PerilousThresholdText => FormatDays(PerilousThresholdDays);
+
+    public string UrgentThresholdText => FormatDays(UrgentThresholdDays);
 
     public bool HasVisibleItems
     {
         get => _hasVisibleItems;
         private set => SetProperty(ref _hasVisibleItems, value);
+    }
+
+    /// <summary>Why the list is empty: nothing added yet, an empty archive, or no search match.</summary>
+    public string EmptyStateText
+    {
+        get => _emptyStateText;
+        private set => SetProperty(ref _emptyStateText, value);
     }
 
     public string SummaryText
@@ -347,47 +394,96 @@ public sealed class MainWindowViewModel : ObservableObject
         private set => SetProperty(ref _currentTimeDisplay, value);
     }
 
+    /// <summary>True while the last attempt to write state.json failed; a retry is pending.</summary>
+    public bool HasSaveError
+    {
+        get => _hasSaveError;
+        private set => SetProperty(ref _hasSaveError, value);
+    }
+
+    /// <summary>A short, non-blocking message the view should surface (for example a refused setting).</summary>
+    public event EventHandler<string>? StatusMessageRequested;
+
+    /// <summary>
+    /// Starts the one-second clock and runs the first notification pass. Call after
+    /// <see cref="NotificationRequested"/> has a listener.
+    /// </summary>
+    public void Start()
+    {
+        if (_started)
+        {
+            return;
+        }
+
+        _started = true;
+        RefreshCountdowns(notify: true, reapplyFilter: false);
+        _timer.Start();
+    }
+
+    /// <summary>
+    /// False once the panel holds <see cref="AppStateService.MaxItems"/> countdowns, the most a
+    /// state file may carry; adding more would only be trimmed away at the next launch.
+    /// </summary>
+    public bool CanAddCountdown => Countdowns.Count < AppStateService.MaxItems;
+
+    /// <summary>Tells the user why a new countdown cannot be added (see <see cref="CanAddCountdown"/>).</summary>
+    public void NotifyCountdownLimit()
+    {
+        StatusMessageRequested?.Invoke(this, _localization.Format("Main.LimitReached", AppStateService.MaxItems));
+    }
+
     public void UpsertCountdown(CountdownItem item)
     {
-        item.Title = item.Title.Trim();
-        item.Subtitle = item.Subtitle.Trim();
-        item.Tags = item.Tags
-            .Select(static tag => tag.Trim())
-            .Where(static tag => !string.IsNullOrWhiteSpace(tag))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        item.ReminderShown = false;
-        item.DueShown = false;
+        var now = DateTimeOffset.Now;
+        item.Title = TextInput.Normalize(item.Title, TextInput.MaxTitleLength);
+        item.Subtitle = TextInput.Normalize(item.Subtitle, TextInput.MaxNoteLength);
 
         var existing = Countdowns.FirstOrDefault(vm => vm.Id == item.Id);
         if (existing is not null)
         {
-            var index = Countdowns.IndexOf(existing);
-            Countdowns[index] = new CountdownItemViewModel(item);
-            existing.Dispose();
+            var previous = existing.Model;
+            item.IsArchived = previous.IsArchived;
+            item.ArchivedAt = previous.ArchivedAt;
+            if (previous.TargetAt == item.TargetAt && previous.ReminderMinutesBefore == item.ReminderMinutesBefore)
+            {
+                // A wording change must not replay alerts that were already shown.
+                item.ReminderShown = previous.ReminderShown;
+                item.DueShown = previous.DueShown;
+            }
+            else
+            {
+                ResetNotificationFlags(item, now);
+            }
+
+            Countdowns[Countdowns.IndexOf(existing)] = new CountdownItemViewModel(item);
         }
         else
         {
-            if (item.CreatedAt == default)
+            if (!CanAddCountdown)
             {
-                item.CreatedAt = DateTimeOffset.Now;
+                NotifyCountdownLimit();
+                return;
             }
 
+            if (item.CreatedAt == default)
+            {
+                item.CreatedAt = now;
+            }
+
+            ResetNotificationFlags(item, now);
             Countdowns.Add(new CountdownItemViewModel(item));
         }
 
-        ReplaceStateItemsFromViewModels();
         SortCountdowns();
-        RefreshCountdowns(forcePersist: true);
+        RefreshCountdowns(notify: false);
+        RequestPersist();
     }
 
     public void RemoveCountdown(CountdownItemViewModel item)
     {
         Countdowns.Remove(item);
-        item.Dispose();
-        ReplaceStateItemsFromViewModels();
-        RefreshCountdowns(forcePersist: true);
+        RefreshCountdowns(notify: false, reapplyFilter: false);
+        RequestPersist();
     }
 
     public void ArchiveCountdown(CountdownItemViewModel item)
@@ -401,8 +497,9 @@ public sealed class MainWindowViewModel : ObservableObject
         item.Model.ArchivedAt = DateTimeOffset.Now;
         item.Model.ReminderShown = true;
         item.Model.DueShown = true;
-        SortCountdowns();
-        RefreshCountdowns(forcePersist: true);
+        item.NotifyModelChanged();
+        RefreshCountdowns(notify: false);
+        RequestPersist();
     }
 
     public void RestoreCountdown(CountdownItemViewModel item)
@@ -414,94 +511,150 @@ public sealed class MainWindowViewModel : ObservableObject
 
         item.Model.IsArchived = false;
         item.Model.ArchivedAt = null;
-        item.Model.ReminderShown = false;
-        item.Model.DueShown = false;
+        // A restored item that is already past its deadline must not re-announce it.
+        ResetNotificationFlags(item.Model, DateTimeOffset.Now);
+        item.NotifyModelChanged();
+        RefreshCountdowns(notify: false);
+        RequestPersist();
+    }
+
+    /// <summary>Pins or unpins a countdown; pinned countdowns sort ahead of the rest.</summary>
+    public void TogglePin(CountdownItemViewModel item)
+    {
+        item.Model.IsPinned = !item.Model.IsPinned;
+        item.NotifyModelChanged();
         SortCountdowns();
-        RefreshCountdowns(forcePersist: true);
+        // The filter ignores the pin, so no view reset; the refresh rebuilds the accessible name,
+        // which mentions it.
+        RefreshCountdowns(notify: false, reapplyFilter: false);
+        RequestPersist();
     }
 
     public void UpdateWindowBounds(double left, double top, double width, double height)
     {
+        if (!double.IsFinite(left) || !double.IsFinite(top) || !double.IsFinite(width) || !double.IsFinite(height))
+        {
+            return;
+        }
+
         _state.Settings.WindowLeft = left;
         _state.Settings.WindowTop = top;
         _state.Settings.WindowWidth = width;
         _state.Settings.WindowHeight = height;
-        ScheduleWindowBoundsPersist();
+        RequestPersist();
     }
 
+    /// <summary>Opens the Windows page that controls packaged startup tasks.</summary>
+    public void OpenStartupSettings()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("ms-settings:startupapps") { UseShellExecute = true });
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            AppLog.Warn("Opening the Windows startup settings failed.", ex);
+        }
+    }
+
+    /// <summary>Writes any pending change immediately; call on exit, session end and dialog close.</summary>
     public void FlushPendingPersist()
     {
-        if (_windowBoundsPersistTimer.IsEnabled)
+        if (_isDirty)
         {
-            _windowBoundsPersistTimer.Stop();
-            Persist();
+            SaveNow();
         }
     }
 
-    private void ScheduleWindowBoundsPersist()
+    public void Dispose()
     {
-        if (_isInitializing)
-        {
-            return;
-        }
-
-        _windowBoundsPersistTimer.Stop();
-        _windowBoundsPersistTimer.Start();
-    }
-
-    private void WindowBoundsPersistTimerOnTick(object? sender, EventArgs e)
-    {
-        _windowBoundsPersistTimer.Stop();
-        Persist();
-    }
-
-    public void Persist()
-    {
-        if (_isInitializing)
+        if (_disposed)
         {
             return;
         }
 
-        ReplaceStateItemsFromViewModels();
-        _state.Settings.AlwaysOnTop = AlwaysOnTop;
-        _state.Settings.LaunchAtStartup = LaunchAtStartup;
-        _state.Settings.HideOnCloseToTray = HideOnCloseToTray;
-        _state.Settings.DesktopLayerEnabled = DesktopLayerEnabled;
-        _state.Settings.PanelOpacity = PanelOpacity;
-        _state.Settings.ShowArchivedOnly = ShowArchivedOnly;
-        _state.Settings.DefaultReminderMinutesBefore = DefaultReminderMinutesBefore;
-        _state.Settings.DefaultTimeZoneId = DefaultTimeZoneId;
-        _state.Settings.TodayThresholdDays = TodayThresholdDays;
-        _state.Settings.SoonThresholdDays = SoonThresholdDays;
-        _state.Settings.SafeThresholdDays = SafeThresholdDays;
-        _state.Settings.LanguageCode = SelectedLanguageCode;
-        _stateService.Save(_state);
+        _disposed = true;
+        _timer.Stop();
+        _persistTimer.Stop();
+        _localization.PropertyChanged -= LocalizationOnPropertyChanged;
+        ThemeService.HighContrastChanged -= ThemeServiceOnHighContrastChanged;
+        SystemEvents.TimeChanged -= SystemEventsOnTimeChanged;
+    }
+
+    private void RequestPersist()
+    {
+        _isDirty = true;
+        _persistTimer.Stop();
+        _persistTimer.Interval = PersistDelay;
+        _persistTimer.Start();
+    }
+
+    private void PersistTimerOnTick(object? sender, EventArgs e)
+    {
+        _persistTimer.Stop();
+        SaveNow();
+    }
+
+    private void SaveNow()
+    {
+        WriteSettingsToState();
+        _state.Items = Countdowns.Select(static vm => vm.ToModelCopy()).ToList();
+        try
+        {
+            _stateService.Save(_state);
+            _isDirty = false;
+            HasSaveError = false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            // Keep the change in memory and retry; a locked or full disk must not crash a
+            // widget that ticks every second.
+            AppLog.Warn("Saving state.json failed; will retry.", ex);
+            HasSaveError = true;
+            _isDirty = true;
+            _persistTimer.Interval = PersistRetryDelay;
+            _persistTimer.Start();
+        }
+    }
+
+    private void WriteSettingsToState()
+    {
+        var settings = _state.Settings;
+        settings.AlwaysOnTop = _alwaysOnTop;
+        settings.HideOnCloseToTray = _hideOnCloseToTray;
+        settings.DesktopLayerEnabled = _desktopLayerEnabled;
+        settings.PanelOpacity = _panelOpacity;
+        settings.ShowArchivedOnly = _showArchivedOnly;
+        settings.DefaultReminderMinutesBefore = _defaultReminderMinutesBefore;
+        settings.DefaultTimeZoneId = _defaultTimeZoneId;
+        settings.TodayThresholdDays = _thresholds.PerilousDays;
+        settings.SafeThresholdDays = _thresholds.UrgentDays;
+        settings.LanguageCode = _selectedLanguageCode;
     }
 
     /// <summary>
     /// Recomputes every countdown against the current time and updates the panel summary.
     /// </summary>
-    /// <param name="forcePersist">Whether to save state even when nothing requested it.</param>
+    /// <param name="notify">Whether reminders and deadline alerts may fire on this pass.</param>
     /// <param name="reapplyFilter">
     /// Whether the collection view must re-evaluate its filter. Refreshing the view raises a
     /// collection reset, which makes the list discard and rebuild every item container, so the
     /// once-a-second tick passes false: elapsed time changes bound values only, never which
-    /// countdowns pass the filter. Callers that do change a filter input — the search text, the
-    /// archive toggle, or the set of countdowns — leave it true.
+    /// countdowns pass the filter. Callers that change a filter input — the search text, the
+    /// archive toggle, an item's archived state or the set of countdowns — leave it true.
     /// </param>
-    private void RefreshCountdowns(bool forcePersist, bool reapplyFilter = true)
+    private void RefreshCountdowns(bool notify, bool reapplyFilter = true)
     {
         var now = DateTimeOffset.Now;
-        var selectedZone = OptionCatalog.ResolveTimeZone(DefaultTimeZoneId);
-        var selectedZoneTime = TimeZoneInfo.ConvertTime(now, selectedZone);
-        var useEnglishZoneName = string.Equals(_localization.CurrentLanguageCode, "en", StringComparison.OrdinalIgnoreCase);
-        var selectedZoneLabel = OptionCatalog.BuildDisplayName(selectedZone, useEnglishZoneName);
-        var shouldPersist = false;
+        var pending = new List<CountdownNotificationEventArgs>();
 
         foreach (var countdown in Countdowns)
         {
-            countdown.Refresh(now, BuildThresholds());
-            shouldPersist |= TryTriggerNotifications(countdown, now);
+            countdown.Refresh(now, _thresholds);
+            if (notify && TryCreateNotification(countdown.Model, now) is { } notification)
+            {
+                pending.Add(notification);
+            }
         }
 
         if (reapplyFilter)
@@ -511,66 +664,90 @@ public sealed class MainWindowViewModel : ObservableObject
 
         var visibleCount = ItemsView.Cast<object>().Count();
         HasVisibleItems = visibleCount > 0;
-        SummaryText = _localization.Format("Summary.VisibleTotal", visibleCount, Countdowns.Count);
-        CurrentTimeDisplay = $"{selectedZoneLabel} | {selectedZoneTime:ddd, MMM dd HH:mm:ss}";
+        SummaryText = _localization.Format("Main.Summary", visibleCount, Countdowns.Count);
+        EmptyStateText = visibleCount > 0
+            ? string.Empty
+            : !string.IsNullOrWhiteSpace(SearchText)
+                ? _localization.Format("Main.Empty.Search", SearchText.Trim())
+                : _localization[ShowArchivedOnly ? "Main.Empty.Archive" : "Main.Empty.Active"];
+        CurrentTimeDisplay = BuildClockText(now);
 
-        if (shouldPersist || forcePersist)
+        if (pending.Count > 0)
         {
-            Persist();
+            RaiseNotifications(pending);
+            RequestPersist();
         }
     }
 
-    private bool TryTriggerNotifications(CountdownItemViewModel countdown, DateTimeOffset now)
+    private string BuildClockText(DateTimeOffset now)
     {
-        var item = countdown.Model;
+        var zone = OptionCatalog.ResolveTimeZone(DefaultTimeZoneId);
+        var zoneTime = TimeZoneInfo.ConvertTime(now, zone);
+        var zoneLabel = OptionCatalog.BuildDisplayName(zone, useEnglishName: !_localization.IsChinese);
+        return _localization.Format(
+            "Main.Clock",
+            zoneLabel,
+            zoneTime.ToString(_localization["Format.Clock"], _localization.Culture));
+    }
+
+    private CountdownNotificationEventArgs? TryCreateNotification(CountdownItem item, DateTimeOffset now)
+    {
         if (item.IsArchived)
         {
-            return false;
+            return null;
         }
 
+        var title = Shorten(item.Title);
         if (!item.ReminderShown &&
             item.ReminderMinutesBefore > 0 &&
-            now >= item.TargetAt - TimeSpan.FromMinutes(item.ReminderMinutesBefore) &&
-            now < item.TargetAt)
+            now < item.TargetAt &&
+            item.TargetAt - now <= TimeSpan.FromMinutes(item.ReminderMinutesBefore))
         {
             item.ReminderShown = true;
-            NotificationRequested?.Invoke(
-                this,
-                new CountdownNotificationEventArgs(
-                    item.Title,
-                    _localization.Format("Notification.DueIn", item.Title, FormatLeadTime(item.TargetAt - now))));
-            return true;
+            return new CountdownNotificationEventArgs(
+                title,
+                _localization.Format("Notification.DueIn", title, _localization.FormatDuration(item.TargetAt - now)));
         }
 
         if (!item.DueShown && now >= item.TargetAt)
         {
             item.DueShown = true;
-            NotificationRequested?.Invoke(
-                this,
-                new CountdownNotificationEventArgs(
-                    item.Title,
-                    _localization.Format("Notification.Reached", item.Title)));
-            return true;
+            item.ReminderShown = true;
+            return new CountdownNotificationEventArgs(title, _localization.Format("Notification.Reached", title));
         }
 
-        return false;
+        return null;
+    }
+
+    private void RaiseNotifications(IReadOnlyList<CountdownNotificationEventArgs> pending)
+    {
+        if (pending.Count == 1)
+        {
+            NotificationRequested?.Invoke(this, pending[0]);
+            return;
+        }
+
+        // Several alerts in one pass (typically after the PC was off) become one balloon
+        // instead of a burst that replaces itself before it can be read.
+        NotificationRequested?.Invoke(
+            this,
+            new CountdownNotificationEventArgs(
+                _localization.Format("Notification.Summary", pending.Count),
+                string.Join(Environment.NewLine, pending.Select(static n => n.Message))));
+    }
+
+    private static void ResetNotificationFlags(CountdownItem item, DateTimeOffset now)
+    {
+        var reminderAt = item.ReminderMinutesBefore > 0 && item.TargetAt > DateTimeOffset.MinValue.AddMinutes(item.ReminderMinutesBefore)
+            ? item.TargetAt.AddMinutes(-item.ReminderMinutesBefore)
+            : item.TargetAt;
+        item.ReminderShown = reminderAt <= now;
+        item.DueShown = item.TargetAt <= now;
     }
 
     private bool FilterCountdown(object candidate)
     {
-        if (candidate is not CountdownItemViewModel item)
-        {
-            return false;
-        }
-
-        if (ShowArchivedOnly)
-        {
-            if (!item.IsArchived)
-            {
-                return false;
-            }
-        }
-        else if (item.IsArchived)
+        if (candidate is not CountdownItemViewModel item || item.IsArchived != ShowArchivedOnly)
         {
             return false;
         }
@@ -581,111 +758,122 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         var query = SearchText.Trim();
-        return item.Title.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-               item.SubtitleDisplay.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-               item.Tags.Any(tag => tag.Contains(query, StringComparison.OrdinalIgnoreCase));
+        return item.Title.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
+               item.Subtitle.Contains(query, StringComparison.CurrentCultureIgnoreCase);
     }
 
-    private void ApplyThresholds(int todayDays, int soonDays, int safeDays, bool persist)
+    private void ApplyThresholds(CountdownThresholds thresholds)
     {
-        var normalized = NormalizeThresholds(todayDays, soonDays, safeDays);
-        var changed = false;
-
-        changed |= SetProperty(ref _todayThresholdDays, normalized.TodayDays, nameof(TodayThresholdDays));
-        changed |= SetProperty(ref _soonThresholdDays, normalized.SoonDays, nameof(SoonThresholdDays));
-        changed |= SetProperty(ref _safeThresholdDays, normalized.SafeDays, nameof(SafeThresholdDays));
-
-        if (!changed)
+        if (thresholds == _thresholds)
         {
+            // Still re-raise so a slider that was dragged past a clamp snaps back to the value.
+            OnPropertyChanged(nameof(PerilousThresholdDays));
+            OnPropertyChanged(nameof(UrgentThresholdDays));
             return;
         }
 
-        _state.Settings.TodayThresholdDays = _todayThresholdDays;
-        _state.Settings.SoonThresholdDays = _soonThresholdDays;
-        _state.Settings.SafeThresholdDays = _safeThresholdDays;
-
-        RefreshCountdowns(forcePersist: persist);
+        _thresholds = thresholds;
+        OnPropertyChanged(nameof(PerilousThresholdDays));
+        OnPropertyChanged(nameof(UrgentThresholdDays));
+        OnPropertyChanged(nameof(MinUrgentThresholdDays));
+        OnPropertyChanged(nameof(PerilousThresholdText));
+        OnPropertyChanged(nameof(UrgentThresholdText));
+        RefreshCountdowns(notify: false, reapplyFilter: false);
+        RequestPersist();
     }
 
-    private CountdownThresholds BuildThresholds()
-    {
-        return new CountdownThresholds(
-            OverdueDays: 0,
-            _todayThresholdDays,
-            _soonThresholdDays,
-            _safeThresholdDays);
-    }
-
-    private static CountdownThresholds NormalizeThresholds(int todayDays, int soonDays, int safeDays)
-    {
-        todayDays = Math.Clamp(Math.Max(todayDays, 1), -30, 60);
-        soonDays = Math.Clamp(Math.Max(soonDays, todayDays + 1), -30, 120);
-        safeDays = Math.Clamp(Math.Max(safeDays, soonDays + 1), -30, 180);
-
-        return new CountdownThresholds(OverdueDays: 0, todayDays, soonDays, safeDays);
-    }
-
+    /// <summary>
+    /// Orders pinned countdowns first, then by deadline and title, moving items in place so the
+    /// list keeps its containers (and keyboard focus) instead of being rebuilt by a reset.
+    /// </summary>
     private void SortCountdowns()
     {
         var ordered = Countdowns
             .OrderByDescending(static item => item.IsPinned)
             .ThenBy(static item => item.TargetAt)
-            .ThenBy(static item => item.Title, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(static item => item.Title, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
 
-        Countdowns.Clear();
-        foreach (var item in ordered)
+        for (var target = 0; target < ordered.Count; target++)
         {
-            Countdowns.Add(item);
+            var current = Countdowns.IndexOf(ordered[target]);
+            if (current != target)
+            {
+                Countdowns.Move(current, target);
+            }
         }
-    }
-
-    private void ReplaceStateItemsFromViewModels()
-    {
-        _state.Items = Countdowns.Select(static vm => vm.ToModelCopy()).ToList();
     }
 
     private void LocalizationOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is not "Item[]" and not nameof(LocalizationService.CurrentLanguageCode))
+        if (e.PropertyName != nameof(LocalizationService.CurrentLanguageCode))
         {
             return;
         }
 
-        LanguageOptions = BuildLanguageOptions();
         ReminderOptions = OptionCatalog.GetReminderOptions();
         TimeZoneOptions = OptionCatalog.GetTimeZoneOptions(_localization.CurrentLanguageCode);
-        OnPropertyChanged(nameof(ArchiveViewTooltipText));
-
-        if (!ReminderOptions.Any(option => option.Minutes == DefaultReminderMinutesBefore))
-        {
-            DefaultReminderMinutesBefore = ReminderOptions.First().Minutes;
-        }
-
-        RefreshCountdowns(forcePersist: false);
+        // The combo boxes lose their selection when their item lists are replaced. The setters
+        // ignore the null a combo box pushes meanwhile (views should not write it back either),
+        // and re-raising the unchanged values makes them select the matching new entries.
+        OnPropertyChanged(nameof(DefaultReminderMinutesBefore));
+        OnPropertyChanged(nameof(DefaultTimeZoneId));
+        OnPropertyChanged(nameof(ArchiveToggleText));
+        OnPropertyChanged(nameof(CloseButtonText));
+        OnPropertyChanged(nameof(PerilousThresholdText));
+        OnPropertyChanged(nameof(UrgentThresholdText));
+        RefreshCountdowns(notify: false, reapplyFilter: false);
     }
 
-    private IReadOnlyList<LanguageOption> BuildLanguageOptions()
+    private void ThemeServiceOnHighContrastChanged(object? sender, EventArgs e)
     {
-        return
-        [
-            new LanguageOption("en", _localization["Language.English"]),
-            new LanguageOption("zh-CN", _localization["Language.Chinese"])
-        ];
+        OnPropertyChanged(nameof(IsHighContrast));
+        OnPropertyChanged(nameof(EffectivePanelOpacity));
     }
 
-    private static string FormatLeadTime(TimeSpan span)
+    private void SystemEventsOnTimeChanged(object? sender, EventArgs e)
     {
-        if (span.TotalDays >= 1)
+        // Raised on a system events thread when the clock or the Windows time zone changes.
+        TimeZoneInfo.ClearCachedData();
+        System.Windows.Application.Current?.Dispatcher.BeginInvoke(() => RefreshCountdowns(notify: false, reapplyFilter: false));
+    }
+
+    private bool SafeIsAutostartEnabled()
+    {
+        try
         {
-            return $"{(int)span.TotalDays}d {span.Hours:D2}h";
+            return _autostartService.IsEnabled();
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or IOException)
+        {
+            AppLog.Warn("Reading the autostart registration failed.", ex);
+            return false;
+        }
+    }
+
+    private string FormatDays(int days)
+    {
+        return days == 1 ? _localization["Settings.Days.One"] : _localization.Format("Settings.Days", days);
+    }
+
+    private static string Shorten(string title)
+    {
+        if (title.Length <= MaxNotificationTitleLength)
+        {
+            return title;
         }
 
-        if (span.TotalHours >= 1)
+        var cut = MaxNotificationTitleLength - 1;
+        if (char.IsHighSurrogate(title[cut - 1]))
         {
-            return $"{(int)span.TotalHours}h {span.Minutes:D2}m";
+            cut--;
         }
 
-        return $"{Math.Max(0, (int)span.TotalMinutes)}m";
+        return title[..cut].TrimEnd() + "…";
+    }
+
+    private static double ClampOpacity(double value)
+    {
+        return double.IsFinite(value) ? Math.Clamp(value, MinPanelOpacity, MaxPanelOpacity) : MaxPanelOpacity;
     }
 }

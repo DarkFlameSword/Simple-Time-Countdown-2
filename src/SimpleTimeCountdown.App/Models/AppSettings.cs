@@ -4,15 +4,11 @@ public sealed class AppSettings
 {
     public bool AlwaysOnTop { get; set; } = true;
 
-    public bool LaunchAtStartup { get; set; }
-
     public bool HideOnCloseToTray { get; set; } = true;
 
     public bool DesktopLayerEnabled { get; set; }
 
     public double PanelOpacity { get; set; } = 0.96;
-
-    public bool HideOverdueCards { get; set; }
 
     public bool ShowArchivedOnly { get; set; }
 
@@ -20,11 +16,14 @@ public sealed class AppSettings
 
     public string DefaultTimeZoneId { get; set; } = TimeZoneInfo.Local.Id;
 
-    public int TodayThresholdDays { get; set; } = 1;
+    /// <summary>Countdowns due within this many days are Perilous.</summary>
+    public int TodayThresholdDays { get; set; } = CountdownThresholds.Default.PerilousDays;
 
-    public int SoonThresholdDays { get; set; } = 7;
-
-    public int SafeThresholdDays { get; set; } = 8;
+    /// <summary>
+    /// Countdowns due within this many days are Urgent; later ones are Standing. The name is
+    /// kept from the three-threshold era so existing state files keep their value.
+    /// </summary>
+    public int SafeThresholdDays { get; set; } = CountdownThresholds.Default.UrgentDays;
 
     public string LanguageCode { get; set; } = "en";
 
@@ -32,7 +31,7 @@ public sealed class AppSettings
 
     public double WindowTop { get; set; } = double.NaN;
 
-    public double WindowWidth { get; set; } = 420;
+    public double WindowWidth { get; set; } = Services.WindowPlacement.DesignWidth;
 
-    public double WindowHeight { get; set; } = 760;
+    public double WindowHeight { get; set; } = Services.WindowPlacement.DefaultHeight;
 }

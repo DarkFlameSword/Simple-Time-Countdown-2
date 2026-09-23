@@ -2,9 +2,18 @@ namespace TimeCountdown.Setup;
 
 internal sealed class InstallOptions
 {
-    public bool LaunchAfterInstall { get; set; } = true;
+    /// <summary>Folder to install into; null uses <see cref="InstallerEngine.DefaultInstallDirectory"/>.</summary>
+    public string? InstallDirectory { get; init; }
 
-    public bool RemoveLocalData { get; set; }
+    /// <summary>Start the app when the install succeeds (never elevated; see <see cref="InstallerEngine"/>).</summary>
+    public bool LaunchAfterInstall { get; init; }
 
-    public string? InstallDirectory { get; set; }
+    public bool CreateDesktopShortcut { get; init; } = true;
+
+    /// <summary>
+    /// Allows Setup to close running copies of the app (they are asked to save and exit first).
+    /// Without it, an install that finds the app running fails with
+    /// <see cref="InstallerError.AppRunning"/>, so the wizard can ask the user before closing it.
+    /// </summary>
+    public bool CloseRunningApp { get; init; }
 }

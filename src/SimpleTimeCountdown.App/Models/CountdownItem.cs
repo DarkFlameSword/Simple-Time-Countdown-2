@@ -24,7 +24,5 @@ public sealed class CountdownItem
 
     public DateTimeOffset? ArchivedAt { get; set; }
 
-    public List<string> Tags { get; set; } = [];
-
     public DateTimeOffset CreatedAt { get; set; }
 }

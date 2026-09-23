@@ -1,230 +1,393 @@
-[CmdletBinding()]
+<#
+.SYNOPSIS
+    Builds the app icon and the MSIX logos from the pocket-watch brand masters.
+
+.DESCRIPTION
+    The design source is src\SimpleTimeCountdown.App\Assets\AppIcon.svg. Its raster exports in the same
+    folder, AppIcon-16/32/48/64/128/256/512/1024.png, are the masters this script works from. When the
+    artwork changes, re-export those PNGs from the SVG and run this script with -Force.
+
+      src\SimpleTimeCountdown.App\Assets\AppIcon.ico
+          The 16-256 px exports combined into one multi-size icon (exe, shortcuts, tray, installer).
+      packaging\msix\Assets\*.png
+          The MSIX logos at scale-100 and scale-200, plus the Square44x44Logo target sizes the taskbar
+          and Start menu use. A size with an exact export uses that file unchanged; every other size is
+          resampled from AppIcon-1024.png. The wide tile and the splash screen set the icon on Paper
+          (#F0E6D2), the background colour AppxManifest.xml declares for them.
+
+    Existing files are kept unless -Force is given, so hand-tuned assets are never overwritten by
+    accident. -Verify changes nothing: it checks that every output exists at the right pixel size and
+    that packaging\msix\Assets holds nothing else (an unqualified logo such as StoreLogo.png would
+    clash with its scale-* variants in resources.pri).
+
+.EXAMPLE
+    .\scripts\Generate-AppAssets.ps1 -Verify
+#>
+[CmdletBinding(DefaultParameterSetName = 'Generate')]
 param(
-    [string]$Root = '',
-    [switch]$Force
+    # Repository root to read the masters from and write the outputs to; defaults to this repository.
+    [string]$Root,
+
+    [Parameter(ParameterSetName = 'Generate')]
+    [switch]$Force,
+
+    [Parameter(ParameterSetName = 'Verify')]
+    [switch]$Verify
 )
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-
-# Idempotent by default: if every output asset already exists, do nothing. Pass -Force
-# to regenerate. This protects user-supplied icons from being overwritten on every publish.
-
-if ([string]::IsNullOrWhiteSpace($Root)) {
-    $scriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $PSCommandPath }
-    $Root = (Resolve-Path (Join-Path $scriptRoot '..')).Path
-}
 
 Add-Type -AssemblyName System.Drawing
 
-$assetDir = Join-Path $Root 'src\SimpleTimeCountdown.App\Assets'
-$msixAssetDir = Join-Path $Root 'packaging\msix\Assets'
-
-New-Item -ItemType Directory -Force -Path $assetDir | Out-Null
-New-Item -ItemType Directory -Force -Path $msixAssetDir | Out-Null
-
-function New-RoundedPath {
-    param(
-        [System.Drawing.RectangleF]$Bounds,
-        [float]$Radius
-    )
-
-    $path = New-Object System.Drawing.Drawing2D.GraphicsPath
-    $maxRadius = [Math]::Max(0.5, [Math]::Min($Bounds.Width, $Bounds.Height) / 2)
-    $Radius = [Math]::Min($Radius, $maxRadius)
-    $diameter = $Radius * 2
-    $path.AddArc($Bounds.X, $Bounds.Y, $diameter, $diameter, 180, 90)
-    $path.AddArc($Bounds.Right - $diameter, $Bounds.Y, $diameter, $diameter, 270, 90)
-    $path.AddArc($Bounds.Right - $diameter, $Bounds.Bottom - $diameter, $diameter, $diameter, 0, 90)
-    $path.AddArc($Bounds.X, $Bounds.Bottom - $diameter, $diameter, $diameter, 90, 90)
-    $path.CloseFigure()
-    return $path
+if ([string]::IsNullOrWhiteSpace($Root)) {
+    $Root = Join-Path $PSScriptRoot '..'
 }
 
-function Draw-AppMark {
+$Root = (Resolve-Path -LiteralPath $Root).Path
+$brandDirectory = Join-Path $Root 'src\SimpleTimeCountdown.App\Assets'
+$msixDirectory = Join-Path $Root 'packaging\msix\Assets'
+$iconPath = Join-Path $brandDirectory 'AppIcon.ico'
+
+$masterSizes = @(16, 32, 48, 64, 128, 256, 512, 1024)
+$iconFrameSizes = @(16, 32, 48, 64, 128, 256)
+# The Casebook "Paper" token; AppxManifest.xml uses the same colour behind the tiles and splash screen.
+$paperColor = [System.Drawing.ColorTranslator]::FromHtml('#F0E6D2')
+# Share of the canvas height the icon takes on the wide tile and splash screen.
+$bannerIconScale = 0.8
+
+function New-AssetSpec {
     param(
-        [System.Drawing.Graphics]$Graphics,
-        [float]$X,
-        [float]$Y,
-        [float]$Size
+        [string]$Name,
+        [int]$Width,
+        [int]$Height = $Width,
+        [switch]$Banner
     )
 
-    $cardRect = [System.Drawing.RectangleF]::new($X, $Y, $Size, $Size)
-    $cardRadius = [Math]::Round($Size * 0.22)
-    $shadowRect = [System.Drawing.RectangleF]::new($X + ($Size * 0.03), $Y + ($Size * 0.05), $Size, $Size)
-
-    $shadowPath = New-RoundedPath -Bounds $shadowRect -Radius $cardRadius
-    $cardPath = New-RoundedPath -Bounds $cardRect -Radius $cardRadius
-
-    $shadowBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(48, 47, 105, 176))
-    $cardBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(232, 252, 254, 255))
-    $cardStroke = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(245, 255, 255, 255), [Math]::Max(2, $Size * 0.018))
-
-    $Graphics.FillPath($shadowBrush, $shadowPath)
-    $Graphics.FillPath($cardBrush, $cardPath)
-    $Graphics.DrawPath($cardStroke, $cardPath)
-
-    $ringRect = [System.Drawing.RectangleF]::new(
-        $X + ($Size * 0.19),
-        $Y + ($Size * 0.18),
-        $Size * 0.62,
-        $Size * 0.62)
-
-    $ringPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(38, 91, 156), [Math]::Max(4, $Size * 0.075))
-    $ringPen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
-    $ringPen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
-    $Graphics.DrawArc($ringPen, $ringRect, 135, 270)
-
-    $accentPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(255, 163, 42), [Math]::Max(4, $Size * 0.085))
-    $accentPen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
-    $accentPen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
-    $Graphics.DrawArc($accentPen, $ringRect, -20, 108)
-
-    $centerX = $ringRect.X + ($ringRect.Width / 2)
-    $centerY = $ringRect.Y + ($ringRect.Height / 2)
-    $hourPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(27, 66, 112), [Math]::Max(4, $Size * 0.05))
-    $hourPen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
-    $hourPen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
-    $Graphics.DrawLine($hourPen, $centerX, $centerY, $centerX, $centerY - ($ringRect.Height * 0.20))
-    $Graphics.DrawLine($hourPen, $centerX, $centerY, $centerX + ($ringRect.Width * 0.18), $centerY + ($ringRect.Height * 0.07))
-
-    $centerBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(27, 66, 112))
-    $Graphics.FillEllipse($centerBrush, $centerX - ($Size * 0.03), $centerY - ($Size * 0.03), $Size * 0.06, $Size * 0.06)
-
-    $barRect = [System.Drawing.RectangleF]::new(
-        $X + ($Size * 0.17),
-        $Y + ($Size * 0.79),
-        $Size * 0.66,
-        $Size * 0.08)
-    $barPath = New-RoundedPath -Bounds $barRect -Radius ([Math]::Round($barRect.Height / 2))
-    $barBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 163, 42))
-    $Graphics.FillPath($barBrush, $barPath)
-
-    $ringPen.Dispose()
-    $accentPen.Dispose()
-    $hourPen.Dispose()
-    $centerBrush.Dispose()
-    $barBrush.Dispose()
-    $cardStroke.Dispose()
-    $cardBrush.Dispose()
-    $shadowBrush.Dispose()
-    $barPath.Dispose()
-    $cardPath.Dispose()
-    $shadowPath.Dispose()
+    [pscustomobject]@{ Name = $Name; Width = $Width; Height = $Height; Banner = [bool]$Banner }
 }
 
-function New-AppBitmap {
-    param(
-        [int]$Size,
-        [string]$OutputPath,
-        [switch]$Wide
-    )
+$msixAssets = @(
+    New-AssetSpec 'Square44x44Logo.scale-100.png' 44
+    New-AssetSpec 'Square44x44Logo.scale-200.png' 88
+    New-AssetSpec 'Square150x150Logo.scale-100.png' 150
+    New-AssetSpec 'Square150x150Logo.scale-200.png' 300
+    New-AssetSpec 'StoreLogo.scale-100.png' 50
+    New-AssetSpec 'StoreLogo.scale-200.png' 100
+    New-AssetSpec 'Wide310x150Logo.scale-100.png' 310 150 -Banner
+    New-AssetSpec 'Wide310x150Logo.scale-200.png' 620 300 -Banner
+    New-AssetSpec 'SplashScreen.scale-100.png' 620 300 -Banner
+    New-AssetSpec 'SplashScreen.scale-200.png' 1240 600 -Banner
 
-    if ($Wide) {
-        $width = 310
-        $height = 150
+    # The taskbar, Start and Alt+Tab pick these by pixel size. The icon carries its own paper plate, so
+    # the "unplated" variants (drawn without the accent-colour plate behind them) use the same art.
+    foreach ($size in 16, 24, 32, 48, 256) {
+        New-AssetSpec "Square44x44Logo.targetsize-$size.png" $size
+        New-AssetSpec "Square44x44Logo.targetsize-${size}_altform-unplated.png" $size
     }
-    else {
-        $width = $Size
-        $height = $Size
-    }
-
-    $bitmap = New-Object System.Drawing.Bitmap($width, $height)
-    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-    $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-    $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-
-    if ($Wide) {
-        $graphics.Clear([System.Drawing.Color]::FromArgb(234, 244, 255))
-        $backgroundRect = [System.Drawing.RectangleF]::new(0, 0, $width, $height)
-        $gradient = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
-            $backgroundRect,
-            [System.Drawing.Color]::FromArgb(246, 250, 255),
-            [System.Drawing.Color]::FromArgb(185, 220, 255),
-            45.0)
-        $graphics.FillRectangle($gradient, $backgroundRect)
-
-        $glowBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(62, 255, 255, 255))
-        $graphics.FillEllipse($glowBrush, -40, -18, $width * 0.55, $height * 0.65)
-        $graphics.FillEllipse($glowBrush, $width * 0.42, $height * 0.48, $width * 0.42, $height * 0.42)
-
-        Draw-AppMark -Graphics $graphics -X 24 -Y 22 -Size 104
-
-        $titleFont = New-Object System.Drawing.Font('Segoe UI Semibold', 22, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
-        $subtitleFont = New-Object System.Drawing.Font('Segoe UI', 10.5, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Pixel)
-        $titleBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(25, 73, 122))
-        $subtitleBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(77, 113, 149))
-
-        $graphics.DrawString('Simple Time', $titleFont, $titleBrush, [System.Drawing.PointF]::new(148, 40))
-        $graphics.DrawString('Countdown', $titleFont, $titleBrush, [System.Drawing.PointF]::new(148, 70))
-        $graphics.DrawString('Lightweight floating countdown panel', $subtitleFont, $subtitleBrush, [System.Drawing.PointF]::new(150, 110))
-
-        $titleFont.Dispose()
-        $subtitleFont.Dispose()
-        $titleBrush.Dispose()
-        $subtitleBrush.Dispose()
-        $glowBrush.Dispose()
-        $gradient.Dispose()
-    }
-    else {
-        $graphics.Clear([System.Drawing.Color]::Transparent)
-        $markSize = [Math]::Round([Math]::Min($width, $height) * 0.76)
-        $markX = ($width - $markSize) / 2
-        $markY = ($height - $markSize) / 2
-        Draw-AppMark -Graphics $graphics -X $markX -Y $markY -Size $markSize
-    }
-
-    $bitmap.Save($OutputPath, [System.Drawing.Imaging.ImageFormat]::Png)
-
-    $graphics.Dispose()
-    $bitmap.Dispose()
-}
-
-function Convert-PngToIcon {
-    param(
-        [string]$PngPath,
-        [string]$IcoPath
-    )
-
-    $pngBytes = [System.IO.File]::ReadAllBytes($PngPath)
-    $stream = [System.IO.File]::Create($IcoPath)
-    $writer = New-Object System.IO.BinaryWriter($stream)
-    $writer.Write([UInt16]0)
-    $writer.Write([UInt16]1)
-    $writer.Write([UInt16]1)
-    $writer.Write([byte]0)
-    $writer.Write([byte]0)
-    $writer.Write([byte]0)
-    $writer.Write([byte]0)
-    $writer.Write([UInt16]1)
-    $writer.Write([UInt16]32)
-    $writer.Write([UInt32]$pngBytes.Length)
-    $writer.Write([UInt32]22)
-    $writer.Write($pngBytes)
-    $writer.Dispose()
-}
-
-$expectedAssets = @(
-    Join-Path $assetDir 'AppIcon-256.png'
-    Join-Path $assetDir 'AppIcon.ico'
-    Join-Path $msixAssetDir 'Square44x44Logo.png'
-    Join-Path $msixAssetDir 'Square150x150Logo.png'
-    Join-Path $msixAssetDir 'StoreLogo.png'
-    Join-Path $msixAssetDir 'Wide310x150Logo.png'
-    Join-Path $msixAssetDir 'SplashScreen.png'
 )
 
-if (-not $Force -and ($expectedAssets | ForEach-Object { Test-Path $_ }) -notcontains $false) {
-    Write-Host "Assets already present, skipping generation. Pass -Force to overwrite."
+function Get-MasterPath {
+    param([int]$Size)
+
+    return Join-Path $brandDirectory "AppIcon-$Size.png"
+}
+
+function Get-ImageSize {
+    param([string]$Path)
+
+    $image = [System.Drawing.Image]::FromFile($Path)
+    try {
+        return "$($image.Width)x$($image.Height)"
+    }
+    finally {
+        $image.Dispose()
+    }
+}
+
+function Get-IconFrameSizes {
+    param([string]$Path)
+
+    # ICONDIR: reserved, type, image count; then one 16-byte ICONDIRENTRY per image, whose first byte is
+    # the width (0 meaning 256).
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -lt 6 -or [BitConverter]::ToUInt16($bytes, 2) -ne 1) {
+        return @()
+    }
+
+    $count = [BitConverter]::ToUInt16($bytes, 4)
+    return @(for ($i = 0; $i -lt $count; $i++) {
+        $width = $bytes[6 + 16 * $i]
+        if ($width -eq 0) { 256 } else { [int]$width }
+    })
+}
+
+function Write-IconFile {
+    <#
+    .SYNOPSIS
+        Writes a multi-size .ico whose images are the given PNG files, stored as PNG (Windows Vista+).
+    #>
+    param(
+        [string]$Path,
+        [int[]]$Sizes
+    )
+
+    $frames = New-Object 'System.Collections.Generic.List[byte[]]'
+    foreach ($size in $Sizes) {
+        $frames.Add([IO.File]::ReadAllBytes((Get-MasterPath $size)))
+    }
+
+    $stream = [IO.File]::Create($Path)
+    try {
+        $writer = New-Object System.IO.BinaryWriter($stream)
+        # ICONDIR: reserved, type 1 = icon, image count.
+        $writer.Write([UInt16]0)
+        $writer.Write([UInt16]1)
+        $writer.Write([UInt16]$frames.Count)
+
+        $offset = 6 + 16 * $frames.Count
+        for ($i = 0; $i -lt $frames.Count; $i++) {
+            # ICONDIRENTRY: width, height (0 means 256), palette size, reserved, colour planes, bits per
+            # pixel, data size, data offset.
+            $dimension = if ($Sizes[$i] -ge 256) { 0 } else { $Sizes[$i] }
+            $writer.Write([byte]$dimension)
+            $writer.Write([byte]$dimension)
+            $writer.Write([byte]0)
+            $writer.Write([byte]0)
+            $writer.Write([UInt16]1)
+            $writer.Write([UInt16]32)
+            $writer.Write([UInt32]$frames[$i].Length)
+            $writer.Write([UInt32]$offset)
+            $offset += $frames[$i].Length
+        }
+
+        foreach ($frame in $frames) {
+            $writer.Write($frame)
+        }
+
+        $writer.Flush()
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
+function New-PaperBackedMaster {
+    <#
+    .SYNOPSIS
+        Returns the master composited onto Paper. The icon's plate is Paper too, so the result is an
+        opaque image with no transparent edge for the resampling filter to ring on.
+    #>
+    param([System.Drawing.Image]$Master)
+
+    $flattened = New-Object System.Drawing.Bitmap($Master.Width, $Master.Height, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $graphics = [System.Drawing.Graphics]::FromImage($flattened)
+    try {
+        $graphics.Clear($paperColor)
+        $graphics.DrawImage($Master, 0, 0, $Master.Width, $Master.Height)
+    }
+    finally {
+        $graphics.Dispose()
+    }
+
+    return $flattened
+}
+
+function New-ResampledBitmap {
+    <#
+    .SYNOPSIS
+        Draws the source, resized to IconSize and centred, on a Width x Height canvas.
+    #>
+    param(
+        [System.Drawing.Image]$Source,
+        [int]$Width,
+        [int]$Height,
+        [int]$IconSize,
+        [System.Drawing.Color]$Background,
+        [System.Drawing.Drawing2D.InterpolationMode]$Interpolation
+    )
+
+    $bitmap = New-Object System.Drawing.Bitmap($Width, $Height, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    $attributes = New-Object System.Drawing.Imaging.ImageAttributes
+    try {
+        # The high-quality modes prefilter when shrinking, so a 1024 px master stays clean at 24 px.
+        $graphics.InterpolationMode = $Interpolation
+        $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+        $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+        # Mirror the source at its border instead of sampling transparent black beyond it.
+        $attributes.SetWrapMode([System.Drawing.Drawing2D.WrapMode]::TileFlipXY)
+        $graphics.Clear($Background)
+        $destination = New-Object System.Drawing.Rectangle(
+            [int][Math]::Floor(($Width - $IconSize) / 2), [int][Math]::Floor(($Height - $IconSize) / 2), $IconSize, $IconSize)
+        $graphics.DrawImage($Source, $destination, 0, 0, $Source.Width, $Source.Height, [System.Drawing.GraphicsUnit]::Pixel, $attributes)
+    }
+    finally {
+        $attributes.Dispose()
+        $graphics.Dispose()
+    }
+
+    return $bitmap
+}
+
+function Copy-AlphaChannel {
+    param(
+        [System.Drawing.Bitmap]$From,
+        [System.Drawing.Bitmap]$To
+    )
+
+    $bounds = New-Object System.Drawing.Rectangle(0, 0, $To.Width, $To.Height)
+    $format = [System.Drawing.Imaging.PixelFormat]::Format32bppArgb
+    $fromData = $From.LockBits($bounds, [System.Drawing.Imaging.ImageLockMode]::ReadOnly, $format)
+    $toData = $To.LockBits($bounds, [System.Drawing.Imaging.ImageLockMode]::ReadWrite, $format)
+    try {
+        $length = $toData.Stride * $To.Height
+        $fromBytes = New-Object byte[] $length
+        $toBytes = New-Object byte[] $length
+        [Runtime.InteropServices.Marshal]::Copy($fromData.Scan0, $fromBytes, 0, $length)
+        [Runtime.InteropServices.Marshal]::Copy($toData.Scan0, $toBytes, 0, $length)
+        # Pixels are stored B, G, R, A: every fourth byte is alpha.
+        for ($i = 3; $i -lt $length; $i += 4) {
+            $toBytes[$i] = $fromBytes[$i]
+        }
+
+        [Runtime.InteropServices.Marshal]::Copy($toBytes, 0, $toData.Scan0, $length)
+    }
+    finally {
+        $From.UnlockBits($fromData)
+        $To.UnlockBits($toData)
+    }
+}
+
+function Save-ResampledAsset {
+    param(
+        [System.Drawing.Image]$Master,
+        [System.Drawing.Image]$PaperMaster,
+        [psobject]$Spec,
+        [string]$Path
+    )
+
+    $bicubic = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    if ($Spec.Banner) {
+        $bitmap = New-ResampledBitmap -Source $PaperMaster -Width $Spec.Width -Height $Spec.Height `
+            -IconSize ([int][Math]::Round($Spec.Height * $bannerIconScale)) -Background $paperColor -Interpolation $bicubic
+    }
+    else {
+        # Bicubic keeps the dial crisp but overshoots along a transparent edge, leaving a light rim around
+        # the plate that shows on a dark taskbar. So the colour comes from the opaque paper-backed master
+        # (bicubic) and the transparency from the original master (bilinear, which cannot overshoot).
+        $bitmap = New-ResampledBitmap -Source $PaperMaster -Width $Spec.Width -Height $Spec.Height `
+            -IconSize $Spec.Width -Background ([System.Drawing.Color]::Transparent) -Interpolation $bicubic
+        $alpha = New-ResampledBitmap -Source $Master -Width $Spec.Width -Height $Spec.Height `
+            -IconSize $Spec.Width -Background ([System.Drawing.Color]::Transparent) `
+            -Interpolation ([System.Drawing.Drawing2D.InterpolationMode]::HighQualityBilinear)
+        try {
+            Copy-AlphaChannel -From $alpha -To $bitmap
+        }
+        finally {
+            $alpha.Dispose()
+        }
+    }
+
+    try {
+        $bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+    }
+    finally {
+        $bitmap.Dispose()
+    }
+}
+
+function Get-UnexpectedMsixFiles {
+    if (-not (Test-Path -LiteralPath $msixDirectory)) {
+        return @()
+    }
+
+    $expectedNames = @($msixAssets | ForEach-Object { $_.Name })
+    return @(Get-ChildItem -LiteralPath $msixDirectory -File | Where-Object { $expectedNames -notcontains $_.Name })
+}
+
+if ($Verify) {
+    $problems = New-Object System.Collections.Generic.List[string]
+
+    if (-not (Test-Path -LiteralPath $iconPath)) {
+        $problems.Add("missing $iconPath")
+    }
+    elseif (((Get-IconFrameSizes $iconPath) -join ',') -ne ($iconFrameSizes -join ',')) {
+        $problems.Add("$iconPath must hold the $($iconFrameSizes -join '/') px images")
+    }
+
+    foreach ($spec in $msixAssets) {
+        $path = Join-Path $msixDirectory $spec.Name
+        if (-not (Test-Path -LiteralPath $path)) {
+            $problems.Add("missing $path")
+        }
+        elseif ((Get-ImageSize $path) -ne "$($spec.Width)x$($spec.Height)") {
+            $problems.Add("$path must be $($spec.Width)x$($spec.Height) px")
+        }
+    }
+
+    foreach ($file in Get-UnexpectedMsixFiles) {
+        $problems.Add("unexpected $($file.FullName) (not produced by this script; remove it)")
+    }
+
+    if ($problems.Count -gt 0) {
+        throw ("Brand assets are incomplete. Run scripts\Generate-AppAssets.ps1 to create missing files.`n  " + ($problems -join "`n  "))
+    }
+
+    Write-Host "All $($msixAssets.Count + 1) brand assets are present."
     return
 }
 
-New-AppBitmap -Size 256 -OutputPath (Join-Path $assetDir 'AppIcon-256.png')
-Convert-PngToIcon -PngPath (Join-Path $assetDir 'AppIcon-256.png') -IcoPath (Join-Path $assetDir 'AppIcon.ico')
+foreach ($size in $masterSizes) {
+    $masterPath = Get-MasterPath $size
+    if (-not (Test-Path -LiteralPath $masterPath)) {
+        throw "Brand master missing: $masterPath. Export it from AppIcon.svg."
+    }
 
-New-AppBitmap -Size 44 -OutputPath (Join-Path $msixAssetDir 'Square44x44Logo.png')
-New-AppBitmap -Size 150 -OutputPath (Join-Path $msixAssetDir 'Square150x150Logo.png')
-New-AppBitmap -Size 50 -OutputPath (Join-Path $msixAssetDir 'StoreLogo.png')
-New-AppBitmap -Size 620 -OutputPath (Join-Path $msixAssetDir 'Wide310x150Logo.png') -Wide
-New-AppBitmap -Size 620 -OutputPath (Join-Path $msixAssetDir 'SplashScreen.png')
+    if ((Get-ImageSize $masterPath) -ne "${size}x${size}") {
+        throw "$masterPath must be exactly $size x $size px."
+    }
+}
 
-Write-Host "Assets generated under $assetDir and $msixAssetDir"
+New-Item -ItemType Directory -Path $msixDirectory -Force | Out-Null
+$written = 0
+$kept = 0
+
+if ($Force -or -not (Test-Path -LiteralPath $iconPath)) {
+    Write-IconFile -Path $iconPath -Sizes $iconFrameSizes
+    $written++
+}
+else {
+    $kept++
+}
+
+$master = [System.Drawing.Image]::FromFile((Get-MasterPath 1024))
+$paperMaster = New-PaperBackedMaster -Master $master
+try {
+    foreach ($spec in $msixAssets) {
+        $path = Join-Path $msixDirectory $spec.Name
+        if (-not $Force -and (Test-Path -LiteralPath $path)) {
+            $kept++
+            continue
+        }
+
+        if (-not $spec.Banner -and $masterSizes -contains $spec.Width) {
+            Copy-Item -LiteralPath (Get-MasterPath $spec.Width) -Destination $path -Force
+        }
+        else {
+            Save-ResampledAsset -Master $master -PaperMaster $paperMaster -Spec $spec -Path $path
+        }
+
+        $written++
+    }
+}
+finally {
+    $paperMaster.Dispose()
+    $master.Dispose()
+}
+
+foreach ($file in Get-UnexpectedMsixFiles) {
+    Write-Warning "$($file.FullName) is not produced by this script and would clash with the generated logos in resources.pri; remove it."
+}
+
+Write-Host "Brand assets: $written written, $kept kept (pass -Force to rebuild existing files)."

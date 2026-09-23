@@ -5,433 +5,570 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:viewModels="clr-namespace:TimeCountdown.ViewModels"
         xmlns:controls="clr-namespace:TimeCountdown.Controls"
+        xmlns:services="clr-namespace:TimeCountdown.Services"
         mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=viewModels:MainWindowViewModel}"
         Title="{Binding [Window.Main.Title], Source={StaticResource Loc}}"
-        Width="520"
-        Height="820"
-        MinWidth="420"
-        MinHeight="600"
+        Width="{x:Static services:WindowPlacement.DesignWidth}"
+        Height="{x:Static services:WindowPlacement.DefaultHeight}"
+        MinWidth="{x:Static services:WindowPlacement.DesignWidth}"
+        MinHeight="{x:Static services:WindowPlacement.MinHeight}"
         AllowsTransparency="True"
         Background="Transparent"
-        FontFamily="{StaticResource SerifFont}"
-        ResizeMode="CanResizeWithGrip"
         WindowStyle="None"
+        ResizeMode="CanResize"
+        UseLayoutRounding="True"
+        FontFamily="{StaticResource SerifFont}"
+        Foreground="{DynamicResource InkBrush}"
         Closing="Window_OnClosing"
         Activated="Window_OnActivated"
         LocationChanged="Window_OnLocationOrSizeChanged"
-        SizeChanged="Window_OnLocationOrSizeChanged">
+        SizeChanged="Window_OnLocationOrSizeChanged"
+        PreviewKeyDown="Window_OnPreviewKeyDown">
 
-    <!-- Single parchment sheet — paper edge feel, no wood frame -->
-    <Border Margin="28,22,28,32"
-            Background="{StaticResource PaperBrush}"
-            BorderBrush="{StaticResource PaperEdgeBrush}"
-            BorderThickness="1"
-            Opacity="{Binding PanelOpacity}"
-            PreviewMouseLeftButtonDown="WindowSurface_OnPreviewMouseLeftButtonDown">
-        <Border.Effect>
-            <DropShadowEffect BlurRadius="32" ShadowDepth="8" Direction="300" Opacity="0.28" Color="#3C2814" />
-        </Border.Effect>
+    <Window.Resources>
+        <!-- Double hairline with a diamond that frames the wordmark. Decorative only. -->
+        <Style x:Key="Ornament.MastheadRule" TargetType="Separator">
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="IsTabStop" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Separator">
+                        <Grid SnapsToDevicePixels="True">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center">
+                                <Border Height="2" Background="{DynamicResource RuleBrush}" />
+                                <Border Height="1" Margin="0,2,0,0" Background="{DynamicResource RuleBrush}" />
+                            </StackPanel>
+                            <Path Grid.Column="1" Width="8" Height="8" Margin="8,0" Stretch="Uniform"
+                                  Data="M 0 -4 L 4 0 L 0 4 L -4 0 Z" Fill="{DynamicResource RuleBrush}" />
+                            <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                <Border Height="2" Background="{DynamicResource RuleBrush}" />
+                                <Border Height="1" Margin="0,2,0,0" Background="{DynamicResource RuleBrush}" />
+                            </StackPanel>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
 
-        <Grid>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
+        <!-- Tooltip of a card action: the action (the tooltip's content), then the card's title
+             and full note. The note may be trimmed on the card, and its own tooltip needs the
+             pointer, so this is how a keyboard user reads it, on archived cards too (they have no
+             Edit dialog). -->
+        <DataTemplate x:Key="CardActionToolTipTemplate">
+            <StackPanel>
+                <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="{Binding}" />
+                <TextBlock Margin="0,4,0,0"
+                           TextWrapping="Wrap"
+                           Text="{Binding PlacementTarget.DataContext.Title, RelativeSource={RelativeSource AncestorType=ToolTip}}" />
+                <TextBlock Margin="0,4,0,0"
+                           TextWrapping="Wrap"
+                           FontStyle="{DynamicResource EmphasisFontStyle}"
+                           Text="{Binding PlacementTarget.DataContext.Subtitle, RelativeSource={RelativeSource AncestorType=ToolTip}}"
+                           Visibility="{Binding PlacementTarget.DataContext.HasSubtitle, RelativeSource={RelativeSource AncestorType=ToolTip}, Converter={StaticResource BooleanToVisibilityConverter}}" />
+            </StackPanel>
+        </DataTemplate>
 
-            <!-- Top chrome bar -->
-            <Border Grid.Row="0"
-                    Height="38"
-                    Background="{StaticResource PaperDeepBrush}"
-                    BorderBrush="{StaticResource InkBrush}"
-                    BorderThickness="0,0,0,1"
-                    MouseLeftButtonDown="Header_OnMouseLeftButtonDown">
-                <Grid>
+        <!-- A ToolTip element can belong to one button only, so these are not shared: every
+             DynamicResource lookup gets its own instance. The ToolTip service sets PlacementTarget
+             to the button when it opens, which is where the action and the card come from. -->
+        <ToolTip x:Key="CardActionToolTip"
+                 x:Shared="False"
+                 Content="{Binding PlacementTarget.(AutomationProperties.Name), RelativeSource={RelativeSource Self}}"
+                 ContentTemplate="{StaticResource CardActionToolTipTemplate}" />
+        <!-- The pin toggle keeps its name and reports "pressed" to screen readers; its tooltip
+             says what a click does now. -->
+        <ToolTip x:Key="CardUnpinToolTip"
+                 x:Shared="False"
+                 Content="{Binding [Card.Action.Unpin], Source={StaticResource Loc}}"
+                 ContentTemplate="{StaticResource CardActionToolTipTemplate}" />
+
+        <!-- Card actions rest in soft ink inside a paper-edge frame so a long list stays calm, and
+             come up to full ink while their card is hovered or holds keyboard focus. The glyphs
+             stay well above 3:1 against the paper in both states. The card title is the help
+             text, so "Delete" is announced together with what it deletes, and it is repeated in
+             the tooltip for sighted users. -->
+        <Style x:Key="Button.CardAction" TargetType="ButtonBase" BasedOn="{StaticResource Button.Icon}">
+            <Setter Property="Foreground" Value="{DynamicResource InkSoftBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource PaperEdgeBrush}" />
+            <Setter Property="ToolTip" Value="{DynamicResource CardActionToolTip}" />
+            <Setter Property="AutomationProperties.HelpText" Value="{Binding Title}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource InkSoftBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource InkSoftBrush}" />
+                </DataTrigger>
+                <!-- Style triggers outrank the template's own hover colour, so it is restated last. -->
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Cards are read and acted on, never selected: the container is a bare presenter, it is
+             not a tab stop itself (Tab goes straight to the card's buttons), and screen readers
+             hear the card's one-sentence summary instead of the view-model type name. -->
+        <Style x:Key="CountdownItemContainer" TargetType="ListBoxItem">
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="IsTabStop" Value="False" />
+            <Setter Property="AutomationProperties.Name" Value="{Binding AccessibleName}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <ContentPresenter />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <!-- The window is transparent; the visible sheet is inset by the margin its shadow needs
+         (WindowPlacement fits the sheet, not the window, to the screen). Resizing is done by
+         hit-testing the sheet's edges (see MainWindow.WndProc). -->
+    <Grid>
+        <Grid x:Name="Sheet"
+              Margin="{x:Static services:WindowPlacement.SheetMargin}"
+              PreviewMouseLeftButtonDown="Sheet_OnPreviewMouseLeftButtonDown">
+
+            <!-- Background layer: paper and chrome band only. It alone takes the panel opacity and the
+                 shadow, so text stays fully opaque and the per-second text updates above it never
+                 make the shadow effect re-render. -->
+            <Border Style="{StaticResource Surface.Sheet}" Opacity="{Binding EffectivePanelOpacity}">
+                <Border VerticalAlignment="Top"
+                        Height="{Binding ActualHeight, ElementName=ChromeBar}"
+                        Background="{DynamicResource PaperDeepBrush}"
+                        BorderBrush="{DynamicResource RuleBrush}"
+                        BorderThickness="0,0,0,1" />
+            </Border>
+
+            <!-- Content layer, inset by the sheet's 1 DIP edge. -->
+            <Grid Margin="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- Chrome bar -->
+                <Border x:Name="ChromeBar" Grid.Row="0" Padding="12,8">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <ToggleButton x:Name="SearchToggle"
+                                      Style="{StaticResource Button.Icon}"
+                                      Checked="SearchToggle_OnChecked"
+                                      Unchecked="SearchToggle_OnUnchecked"
+                                      ToolTip="{Binding [Main.Search.Tooltip], Source={StaticResource Loc}}"
+                                      AutomationProperties.Name="{Binding [Main.Search.Tooltip], Source={StaticResource Loc}}">
+                            <Path Style="{StaticResource Glyph.Icon}"
+                                  Data="M 11.5 7 A 4.5 4.5 0 1 1 2.5 7 A 4.5 4.5 0 1 1 11.5 7 Z M 10.3 10.3 L 14 14" />
+                        </ToggleButton>
+
+                        <StackPanel Grid.Column="2" Orientation="Horizontal">
+                            <Button x:Name="NewButton"
+                                    Style="{StaticResource Button.Icon}"
+                                    Click="NewCountdown_Click"
+                                    ToolTip="{Binding [Main.Button.New], Source={StaticResource Loc}}"
+                                    AutomationProperties.Name="{Binding [Main.Button.New], Source={StaticResource Loc}}">
+                                <Path Style="{StaticResource Glyph.Icon}" Data="M 8 2.5 L 8 13.5 M 2.5 8 L 13.5 8" />
+                            </Button>
+                            <Button Margin="4,0,0,0"
+                                    Style="{StaticResource Button.Icon}"
+                                    Click="OpenSettings_Click"
+                                    ToolTip="{Binding [Main.Button.Settings], Source={StaticResource Loc}}"
+                                    AutomationProperties.Name="{Binding [Main.Button.Settings], Source={StaticResource Loc}}">
+                                <Path Style="{StaticResource Glyph.Icon}"
+                                      Data="M 6.68 3.07 L 7.05 1.27 L 8.95 1.27 L 9.32 3.07 L 10.55 3.58 L 12.09 2.57 L 13.43 3.91 L 12.42 5.45 L 12.93 6.68 L 14.73 7.05 L 14.73 8.95 L 12.93 9.32 L 12.42 10.55 L 13.43 12.09 L 12.09 13.43 L 10.55 12.42 L 9.32 12.93 L 8.95 14.73 L 7.05 14.73 L 6.68 12.93 L 5.45 12.42 L 3.91 13.43 L 2.57 12.09 L 3.58 10.55 L 3.07 9.32 L 1.27 8.95 L 1.27 7.05 L 3.07 6.68 L 3.58 5.45 L 2.57 3.91 L 3.91 2.57 L 5.45 3.58 Z M 10.3 8 A 2.3 2.3 0 1 1 5.7 8 A 2.3 2.3 0 1 1 10.3 8 Z" />
+                            </Button>
+                            <ToggleButton x:Name="ArchiveToggle"
+                                          Margin="4,0,0,0"
+                                          Style="{StaticResource Button.Icon}"
+                                          IsChecked="{Binding ShowArchivedOnly}"
+                                          ToolTip="{Binding ArchiveToggleText}"
+                                          AutomationProperties.Name="{Binding ArchiveToggleText}">
+                                <Path Style="{StaticResource Glyph.Icon}"
+                                      Data="M 1.5 3 L 14.5 3 L 14.5 6 L 1.5 6 Z M 2.5 6 L 2.5 13.5 L 13.5 13.5 L 13.5 6 M 6 9 L 10 9" />
+                            </ToggleButton>
+
+                            <!-- Window controls sit apart from the actions, and Close apart again. -->
+                            <Button Margin="16,0,0,0" Click="MinimizeButton_Click">
+                                <Button.Style>
+                                    <!-- In desktop-layer mode the panel has no taskbar button to come
+                                         back from, so minimizing sends it to the tray instead. -->
+                                    <Style TargetType="Button" BasedOn="{StaticResource Button.Icon}">
+                                        <Setter Property="ToolTip" Value="{Binding [Main.Button.Minimize], Source={StaticResource Loc}}" />
+                                        <Setter Property="AutomationProperties.Name" Value="{Binding [Main.Button.Minimize], Source={StaticResource Loc}}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding DesktopLayerEnabled}" Value="True">
+                                                <Setter Property="ToolTip" Value="{Binding [Main.Button.MinimizeToTray], Source={StaticResource Loc}}" />
+                                                <Setter Property="AutomationProperties.Name" Value="{Binding [Main.Button.MinimizeToTray], Source={StaticResource Loc}}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                                <Path Style="{StaticResource Glyph.Icon}" Data="M 3.5 12.5 L 12.5 12.5" />
+                            </Button>
+                            <Button Margin="16,0,0,0"
+                                    Style="{StaticResource Button.Icon}"
+                                    Click="CloseButton_Click"
+                                    ToolTip="{Binding CloseButtonText}"
+                                    AutomationProperties.Name="{Binding CloseButtonText}">
+                                <Path Style="{StaticResource Glyph.Icon}" Data="M 4 4 L 12 12 M 12 4 L 4 12" />
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- Masthead -->
+                <StackPanel Grid.Row="1" Margin="24,20,24,0">
+                    <!-- Centred as a group so the rules take the wordmark's width at every scale. -->
+                    <StackPanel HorizontalAlignment="Center">
+                        <Separator Style="{StaticResource Ornament.MastheadRule}" />
+                        <!-- The wordmark is brand artwork, identical in every language like the
+                             product name, so it is not translatable text; screen readers hear the
+                             product name from the localization table instead of the dotted capitals.
+                             It is one unbreakable line: the DownOnly Viewbox fits it to a narrow
+                             panel instead of clipping it. -->
+                        <Viewbox Margin="0,8" Stretch="Uniform" StretchDirection="DownOnly">
+                            <TextBlock Style="{StaticResource Text.Masthead}"
+                                       AutomationProperties.Name="{Binding [App.Name], Source={StaticResource Loc}}">
+                                <Run Text="SIMPLE" /><Run Text="  ·  " Foreground="{DynamicResource InkFaintBrush}" /><Run Text="TIME" /><Run Text="  ·  " Foreground="{DynamicResource InkFaintBrush}" /><Run Text="COUNTDOWN" />
+                            </TextBlock>
+                        </Viewbox>
+                        <Separator Style="{StaticResource Ornament.MastheadRule}" RenderTransformOrigin="0.5,0.5">
+                            <Separator.RenderTransform>
+                                <ScaleTransform ScaleY="-1" />
+                            </Separator.RenderTransform>
+                        </Separator>
+                    </StackPanel>
+
+                    <TextBlock Margin="0,12,0,0"
+                               Style="{StaticResource Text.Emphasis}"
+                               TextAlignment="Center"
+                               Text="{Binding [Main.Subtitle], Source={StaticResource Loc}}" />
+                    <!-- Localized time-zone names run long, so the clock wraps rather than shrinking. -->
+                    <TextBlock Margin="0,4,0,0"
+                               Style="{StaticResource Text.Caption}"
+                               TextAlignment="Center"
+                               Text="{Binding CurrentTimeDisplay}" />
+
+                    <Border Margin="0,12,0,0"
+                            Padding="12,2"
+                            HorizontalAlignment="Center"
+                            BorderBrush="{DynamicResource InkSoftBrush}"
+                            BorderThickness="0,1"
+                            Visibility="{Binding ShowArchivedOnly, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <TextBlock Style="{StaticResource Text.Label}"
+                                   TextWrapping="NoWrap"
+                                   Text="{Binding [Main.ArchiveBanner], Source={StaticResource Loc}}" />
+                    </Border>
+
+                    <Separator Margin="0,16,0,0" Style="{StaticResource Ornament.DiamondRule}" />
+                </StackPanel>
+
+                <!-- Search row, opened from the chrome bar or with Ctrl+F -->
+                <Grid x:Name="SearchRow"
+                      Grid.Row="2"
+                      Margin="24,12,24,0"
+                      Visibility="{Binding IsChecked, ElementName=SearchToggle, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
-                        <Button Style="{StaticResource ChromeIconButton}"
-                                Click="ToggleSearch_Click"
-                                Margin="0"
-                                ToolTip="{Binding [Main.Search.Tooltip], Source={StaticResource Loc}}">
-                            <Canvas Width="14" Height="14">
-                                <Ellipse Width="8" Height="8"
-                                         Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                         StrokeThickness="1.2"
-                                         Canvas.Left="1" Canvas.Top="1" />
-                                <Line X1="7.5" Y1="7.5" X2="12" Y2="12"
-                                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                      StrokeThickness="1.4" />
-                            </Canvas>
-                        </Button>
-                    </StackPanel>
-
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,12,0">
-                        <Button Style="{StaticResource ChromeIconButton}"
-                                Click="AddCountdown_Click"
-                                ToolTip="{Binding [Main.Button.New], Source={StaticResource Loc}}">
-                            <Grid Width="14" Height="14">
-                                <Line X1="7" Y1="2" X2="7" Y2="12" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.2" />
-                                <Line X1="2" Y1="7" X2="12" Y2="7" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.2" />
-                            </Grid>
-                        </Button>
-                        <Button Style="{StaticResource ChromeIconButton}"
-                                Click="OpenSettings_Click"
-                                ToolTip="{Binding [Main.Button.Settings], Source={StaticResource Loc}}">
-                            <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                  StrokeThickness="1.1"
-                                  Fill="Transparent"
-                                  Data="M 7 2 L 8.2 4 L 10.5 3.6 L 11 5.8 L 13 6.5 L 12.4 8.5 L 13.6 10.4 L 11.8 11.6 L 11.4 13.4 L 9.2 13 L 7 14 L 4.8 13 L 2.6 13.4 L 2.2 11.6 L 0.4 10.4 L 1.6 8.5 L 1 6.5 L 3 5.8 L 3.5 3.6 L 5.8 4 Z M 7 5.5 A 1.6 1.6 0 1 0 7.001 5.5" />
-                        </Button>
-                        <Button Style="{StaticResource ChromeIconButton}"
-                                Click="ToggleArchiveView_Click"
-                                ToolTip="{Binding ArchiveViewTooltipText}">
-                            <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                  StrokeThickness="1.1"
-                                  Fill="Transparent"
-                                  Data="M 1 4 L 13 4 L 13 12 L 1 12 Z M 1 6.5 L 13 6.5 M 5.5 9 L 8.5 9" />
-                        </Button>
-                        <Button Style="{StaticResource ChromeIconButton}"
-                                Click="HideWindow_Click"
-                                ToolTip="{Binding [Main.Button.Hide], Source={StaticResource Loc}}">
-                            <Line X1="3" Y1="11" X2="11" Y2="11" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.4" />
-                        </Button>
-                        <Button Style="{StaticResource ChromeIconButton}"
-                                Click="ExitWindow_Click"
-                                ToolTip="{Binding [Main.Button.Exit], Source={StaticResource Loc}}"
-                                Margin="0">
-                            <Grid Width="14" Height="14">
-                                <Line X1="3" Y1="3" X2="11" Y2="11" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.4" />
-                                <Line X1="11" Y1="3" X2="3" Y2="11" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.4" />
-                            </Grid>
-                        </Button>
-                    </StackPanel>
-                </Grid>
-            </Border>
-
-            <!-- Masthead -->
-            <StackPanel Grid.Row="1" Margin="20,28,20,0" HorizontalAlignment="Center" MouseLeftButtonDown="Header_OnMouseLeftButtonDown">
-                <Grid HorizontalAlignment="Center" Margin="0,0,0,8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="140" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="140" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                        <Border Height="1.5" Background="{StaticResource RuleBrush}" />
-                        <Border Height="0.5" Background="{StaticResource RuleBrush}" Margin="0,3,0,0" />
-                    </StackPanel>
-                    <Path Grid.Column="1"
-                          Width="10" Height="10" Margin="6,0"
-                          Stretch="Uniform"
-                          Data="M 0 -4 L 4 0 L 0 4 L -4 0 Z"
-                          Fill="{StaticResource RuleBrush}" />
-                    <StackPanel Grid.Column="2" VerticalAlignment="Center">
-                        <Border Height="1.5" Background="{StaticResource RuleBrush}" />
-                        <Border Height="0.5" Background="{StaticResource RuleBrush}" Margin="0,3,0,0" />
-                    </StackPanel>
+                    <TextBox x:Name="SearchBox"
+                             Style="{StaticResource TextBox.Search}"
+                             MaxLength="{x:Static services:TextInput.MaxSearchLength}"
+                             controls:Hint.Text="{Binding [Main.Search.Placeholder], Source={StaticResource Loc}}"
+                             AutomationProperties.Name="{Binding [Main.Search.Label], Source={StaticResource Loc}}"
+                             Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                             PreviewKeyDown="SearchBox_OnPreviewKeyDown" />
+                    <Button Grid.Column="1"
+                            Margin="8,0,0,0"
+                            VerticalAlignment="Center"
+                            Click="ClearSearch_Click"
+                            ToolTip="{Binding [Main.Search.Clear], Source={StaticResource Loc}}"
+                            AutomationProperties.Name="{Binding [Main.Search.Clear], Source={StaticResource Loc}}">
+                        <Button.Style>
+                            <!-- Hidden rather than collapsed so the field does not jump on the first keystroke. -->
+                            <Style TargetType="Button" BasedOn="{StaticResource Button.Icon}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value="">
+                                        <Setter Property="Visibility" Value="Hidden" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                        <Path Style="{StaticResource Glyph.Icon}" Data="M 5 5 L 11 11 M 11 5 L 5 11" />
+                    </Button>
                 </Grid>
 
-                <!-- One unbreakable 25-character line, so its design size is chosen to fit the
-                     panel at its narrowest and then scales up with everything else. The Viewbox
-                     only guards against clipping if a future title outgrows the panel. -->
-                <Viewbox HorizontalAlignment="Center"
-                         Stretch="Uniform"
-                         StretchDirection="DownOnly">
-                    <TextBlock FontFamily="{StaticResource SerifFont}"
-                               FontWeight="Bold"
-                               FontSize="{Binding Path=(controls:UiScale.FontScale), RelativeSource={RelativeSource Self}, Converter={StaticResource ScaledFontSize}, ConverterParameter=22}"
-                               Foreground="{StaticResource InkBrush}"
-                               TextAlignment="Center">
-                        <Run Text="SIMPLE" /><Run Text="  ·  " Foreground="{StaticResource RuleBrush}" /><Run Text="TIME" /><Run Text="  ·  " Foreground="{StaticResource RuleBrush}" /><Run Text="COUNTDOWN" />
-                    </TextBlock>
-                </Viewbox>
+                <!-- Countdown list and its empty state -->
+                <Grid Grid.Row="3" Margin="0,8,0,0">
+                    <TextBlock Margin="32,24,32,0"
+                               VerticalAlignment="Top"
+                               Style="{StaticResource Text.Emphasis}"
+                               TextAlignment="Center"
+                               Text="{Binding EmptyStateText, NotifyOnTargetUpdated=True}"
+                               TargetUpdated="LiveRegion_OnTargetUpdated"
+                               AutomationProperties.LiveSetting="Polite"
+                               Visibility="{Binding HasVisibleItems, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
 
-                <Grid HorizontalAlignment="Center" Margin="0,8,0,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="140" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="140" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                        <Border Height="0.5" Background="{StaticResource RuleBrush}" />
-                        <Border Height="1.5" Background="{StaticResource RuleBrush}" Margin="0,3,0,0" />
-                    </StackPanel>
-                    <Path Grid.Column="1"
-                          Width="10" Height="10" Margin="6,0"
-                          Stretch="Uniform"
-                          Data="M 0 -4 L 4 0 L 0 4 L -4 0 Z"
-                          Fill="{StaticResource RuleBrush}" />
-                    <StackPanel Grid.Column="2" VerticalAlignment="Center">
-                        <Border Height="0.5" Background="{StaticResource RuleBrush}" />
-                        <Border Height="1.5" Background="{StaticResource RuleBrush}" Margin="0,3,0,0" />
-                    </StackPanel>
-                </Grid>
+                    <!-- TabNavigation=Continue lets Tab walk through every card's buttons (a ListBox
+                         otherwise takes one stop for the whole list). Virtualized with pixel scrolling
+                         so a long list only realizes the cards on screen and still scrolls smoothly.
+                         Home, End and the page keys move focus between cards (see
+                         CountdownList_OnPreviewKeyDown); the arrows already do. -->
+                    <ListBox x:Name="CountdownList"
+                             PreviewKeyDown="CountdownList_OnPreviewKeyDown"
+                             Margin="16,0,16,0"
+                             Padding="0"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             FocusVisualStyle="{StaticResource FocusRing}"
+                             ItemsSource="{Binding ItemsView}"
+                             ItemContainerStyle="{StaticResource CountdownItemContainer}"
+                             AutomationProperties.Name="{Binding [Main.List.Name], Source={StaticResource Loc}}"
+                             KeyboardNavigation.TabNavigation="Continue"
+                             ScrollViewer.CanContentScroll="True"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                             VirtualizingPanel.IsVirtualizing="True"
+                             VirtualizingPanel.VirtualizationMode="Recycling"
+                             VirtualizingPanel.ScrollUnit="Pixel">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="{x:Type viewModels:CountdownItemViewModel}">
+                                <Grid x:Name="Card" Background="Transparent">
+                                    <Border x:Name="CardWash" Background="{DynamicResource PaperDeepBrush}" Opacity="0" CornerRadius="2" />
+                                    <Border Height="1" Margin="8,0" VerticalAlignment="Bottom" Background="{DynamicResource PaperEdgeBrush}" />
 
-                <TextBlock HorizontalAlignment="Center"
-                           Margin="0,12,0,0"
-                           FontFamily="{StaticResource SerifFont}"
-                           FontStyle="Italic"
-                           FontSize="{Binding Path=(controls:UiScale.FontScale), RelativeSource={RelativeSource Self}, Converter={StaticResource ScaledFontSize}, ConverterParameter=12}"
-                           Foreground="{StaticResource InkSoftBrush}"
-                           Text="{Binding [Casebook.Subtitle], Source={StaticResource Loc}}" />
+                                    <StackPanel Margin="8,16,8,16">
+                                        <!-- Status line: badge, hairline, pinned mark -->
+                                        <DockPanel>
+                                            <!-- One short word: kept on one line so layout rounding can
+                                                 never push its last character onto a hidden second line. -->
+                                            <TextBlock DockPanel.Dock="Left"
+                                                       Style="{StaticResource Text.StatusBadge}"
+                                                       TextWrapping="NoWrap"
+                                                       Text="{Binding StatusText}" />
+                                            <TextBlock DockPanel.Dock="Right"
+                                                       Margin="8,0,0,0"
+                                                       VerticalAlignment="Center"
+                                                       Style="{StaticResource Text.Label}"
+                                                       TextWrapping="NoWrap"
+                                                       Text="{Binding [Card.Pinned], Source={StaticResource Loc}}"
+                                                       Visibility="{Binding IsPinned, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                            <Border Height="1" Margin="8,0,0,0" VerticalAlignment="Center" Background="{DynamicResource PaperEdgeBrush}" />
+                                        </DockPanel>
 
-                <!-- Localized time-zone names run long (the Chinese names are several times the
-                     width of the English ids), so this line wraps onto another line rather than
-                     being fitted down to an unreadable size, and keeps the scale it is given. -->
-                <TextBlock HorizontalAlignment="Center"
-                           Margin="0,4,0,0"
-                           FontFamily="{StaticResource SerifFont}"
-                           FontSize="{Binding Path=(controls:UiScale.FontScale), RelativeSource={RelativeSource Self}, Converter={StaticResource ScaledFontSize}, ConverterParameter=12}"
-                           Foreground="{StaticResource InkSoftBrush}"
-                           TextAlignment="Center"
-                           TextWrapping="Wrap"
-                           Text="{Binding CurrentTimeDisplay}" />
+                                        <!-- The title is the card's most important line, so it has the
+                                             full width to itself and is never trimmed: a long title
+                                             steps its type size down, then wraps (CardTitleText). -->
+                                        <controls:CardTitleText Margin="0,8,0,0"
+                                                                Style="{StaticResource Text.CardTitle}"
+                                                                Text="{Binding Title}" />
 
-                <Grid Margin="0,18,0,0">
-                    <Border Height="1" Background="{StaticResource RuleBrush}" Opacity="0.7" />
-                    <Border HorizontalAlignment="Center" Background="{StaticResource PaperBrush}" Padding="8,0">
-                        <TextBlock Text="❦" FontFamily="Segoe UI Symbol" FontSize="{Binding Path=(controls:UiScale.FontScale), RelativeSource={RelativeSource Self}, Converter={StaticResource ScaledFontSize}, ConverterParameter=14}" Foreground="{StaticResource RuleBrush}" />
-                    </Border>
-                </Grid>
-            </StackPanel>
+                                        <!-- Note and deadline beside the numerals when both fit; otherwise
+                                             the numerals move under them (CardFiguresPanel). -->
+                                        <controls:CardFiguresPanel Margin="0,6,0,0">
+                                            <StackPanel>
+                                                <TextBlock Style="{StaticResource Text.CardNote}"
+                                                           Text="{Binding Subtitle}"
+                                                           ToolTip="{Binding Subtitle}"
+                                                           Visibility="{Binding HasSubtitle, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                <TextBlock Margin="0,4,0,0"
+                                                           Style="{StaticResource Text.Label}"
+                                                           Text="{Binding DeadlineDisplay}" />
+                                            </StackPanel>
 
-            <!-- Search row — hidden by default, toggled by the magnifier in the chrome bar -->
-            <Grid Grid.Row="2" x:Name="SearchRow" Margin="40,18,40,0" Visibility="Collapsed">
-                <TextBox x:Name="SearchTextBox"
-                         Style="{StaticResource SearchTextBox}"
-                         ToolTip="{Binding [Main.Search.Tooltip], Source={StaticResource Loc}}"
-                         Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" />
-            </Grid>
+                                            <!-- Tabular figures keep the block the same width as the
+                                                 seconds tick, so the layout never shifts. -->
+                                            <StackPanel Orientation="Horizontal">
+                                                <StackPanel>
+                                                    <TextBlock HorizontalAlignment="Right"
+                                                               Style="{StaticResource Text.StatusDisplay}"
+                                                               Typography.NumeralAlignment="Tabular"
+                                                               Text="{Binding PrimaryUnitsLeading}" />
+                                                    <TextBlock HorizontalAlignment="Right"
+                                                               Style="{StaticResource Text.Label}"
+                                                               Text="{Binding PrimaryUnitsLeadingLabel}" />
+                                                </StackPanel>
+                                                <StackPanel Margin="12,0,0,0">
+                                                    <TextBlock HorizontalAlignment="Right"
+                                                               Style="{StaticResource Text.StatusDisplay}"
+                                                               Typography.NumeralAlignment="Tabular"
+                                                               Text="{Binding PrimaryUnitsTrailing}" />
+                                                    <TextBlock HorizontalAlignment="Right"
+                                                               Style="{StaticResource Text.Label}"
+                                                               Text="{Binding PrimaryUnitsTrailingLabel}" />
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </controls:CardFiguresPanel>
 
-            <Grid Grid.Row="3"
-                  Margin="40,40,40,40"
-                  Visibility="{Binding HasVisibleItems, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
-                <TextBlock HorizontalAlignment="Center"
-                           FontFamily="{StaticResource SerifFont}"
-                           FontStyle="Italic"
-                           FontSize="{Binding Path=(controls:UiScale.FontScale), RelativeSource={RelativeSource Self}, Converter={StaticResource ScaledFontSize}, ConverterParameter=14}"
-                           Foreground="{StaticResource InkSoftBrush}"
-                           Text="{Binding [Main.Empty], Source={StaticResource Loc}}" />
-            </Grid>
+                                        <controls:CigarCountdown x:Name="Cigar"
+                                                                 Margin="0,8,0,0"
+                                                                 Height="120"
+                                                                 Progress="{Binding ProgressFraction}"
+                                                                 BurntOutCaption="{Binding [Cigar.BurntOut], Source={StaticResource Loc}}"
+                                                                 AutomationProperties.Name="{Binding ProgressAccessibleName}" />
 
-            <ListBox Grid.Row="4"
-                     Margin="32,16,32,0"
-                     Background="Transparent"
-                     BorderThickness="0"
-                     Foreground="{StaticResource InkBrush}"
-                     ItemsSource="{Binding ItemsView}"
-                     ScrollViewer.CanContentScroll="False"
-                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                     ScrollViewer.VerticalScrollBarVisibility="Auto">
-                <ListBox.Resources>
-                    <Style TargetType="ScrollBar" BasedOn="{StaticResource ParchmentScrollBar}" />
-                </ListBox.Resources>
-                <ListBox.ItemContainerStyle>
-                    <Style TargetType="ListBoxItem">
-                        <Setter Property="Background" Value="Transparent" />
-                        <Setter Property="BorderThickness" Value="0" />
-                        <Setter Property="Padding" Value="0" />
-                        <Setter Property="Margin" Value="0,0,0,4" />
-                        <Setter Property="Focusable" Value="False" />
-                        <Setter Property="Template">
-                            <Setter.Value>
-                                <ControlTemplate TargetType="ListBoxItem">
-                                    <ContentPresenter />
-                                </ControlTemplate>
-                            </Setter.Value>
-                        </Setter>
-                    </Style>
-                </ListBox.ItemContainerStyle>
-                <ListBox.ItemTemplate>
-                    <DataTemplate DataType="{x:Type viewModels:CountdownItemViewModel}">
-                        <Grid Margin="0,0,0,18">
-                            <Border x:Name="CardBg" Background="Transparent" />
-                            <StackPanel Margin="6,8,6,12">
-                                <DockPanel LastChildFill="True">
-                                    <TextBlock DockPanel.Dock="Left"
-                                               Margin="0,0,8,0"
-                                               Style="{StaticResource SectionMarker}"
-                                               Foreground="{Binding StatusAccentBrush}"
-                                               Text="—" />
-                                    <TextBlock DockPanel.Dock="Right"
-                                               Margin="8,0,0,0"
-                                               Style="{StaticResource SectionMarker}"
-                                               Foreground="{Binding StatusAccentBrush}"
-                                               Text="—" />
-                                    <TextBlock Style="{StaticResource SectionMarker}"
-                                               Foreground="{Binding StatusAccentBrush}"
-                                               Text="{Binding StatusBadgeText}" />
-                                </DockPanel>
+                                        <controls:PostalStamp x:Name="Stamp"
+                                                              Width="136"
+                                                              Height="136"
+                                                              Margin="0,12,0,4"
+                                                              HorizontalAlignment="Center"
+                                                              Visibility="Collapsed"
+                                                              Stroke="{DynamicResource AccentBrush}"
+                                                              StampFontFamily="{StaticResource SerifFont}"
+                                                              TopText="{Binding [Stamp.Top], Source={StaticResource Loc}}"
+                                                              BottomText="{Binding [Stamp.Bottom], Source={StaticResource Loc}}"
+                                                              DateText="{Binding ArchiveStampDateLabel}" />
 
-                                <Grid Margin="0,8,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0">
-                                        <TextBlock FontFamily="{StaticResource SerifFont}"
-                                                   FontWeight="SemiBold"
-                                                   FontSize="{Binding Path=(controls:UiScale.FontScale), RelativeSource={RelativeSource Self}, Converter={StaticResource ScaledFontSize}, ConverterParameter=28}"
-                                                   Foreground="{StaticResource InkBrush}"
-                                                   Text="{Binding Title}"
-                                                   TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Margin="0,4,0,0"
-                                                   Style="{StaticResource BodyItalic}"
-                                                   Text="{Binding SubtitleWithDash}" />
-                                        <TextBlock Margin="0,4,0,0"
-                                                   Style="{StaticResource SmallCapsLabel}"
-                                                   Text="{Binding RomanDeadlineDisplay}" />
-                                    </StackPanel>
-                                    <!-- Equal-sized day/hr numerals, both in status color -->
-                                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top" Margin="14,4,0,0">
-                                        <StackPanel Margin="0,0,12,0">
-                                            <TextBlock FontFamily="{StaticResource SerifFont}"
-                                                       FontWeight="Bold"
-                                                       FontSize="{Binding Path=(controls:UiScale.FontScale), RelativeSource={RelativeSource Self}, Converter={StaticResource ScaledFontSize}, ConverterParameter=40}"
-                                                       HorizontalAlignment="Right"
-                                                       Foreground="{Binding StatusAccentBrush}"
-                                                       Text="{Binding PrimaryUnitsLeading}" />
-                                            <TextBlock Style="{StaticResource SmallCapsLabel}"
-                                                       HorizontalAlignment="Right"
-                                                       Text="{Binding PrimaryUnitsLeadingLabel}" />
-                                        </StackPanel>
-                                        <StackPanel>
-                                            <TextBlock FontFamily="{StaticResource SerifFont}"
-                                                       FontWeight="Bold"
-                                                       FontSize="{Binding Path=(controls:UiScale.FontScale), RelativeSource={RelativeSource Self}, Converter={StaticResource ScaledFontSize}, ConverterParameter=40}"
-                                                       HorizontalAlignment="Right"
-                                                       Foreground="{Binding StatusAccentBrush}"
-                                                       Text="{Binding PrimaryUnitsTrailing}" />
-                                            <TextBlock Style="{StaticResource SmallCapsLabel}"
-                                                       HorizontalAlignment="Right"
-                                                       Text="{Binding PrimaryUnitsTrailingLabel}" />
-                                        </StackPanel>
+                                        <!-- Footer: elapsed share (active) or filing date (archived), then the actions -->
+                                        <Grid Margin="0,8,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <StackPanel x:Name="ElapsedBlock" VerticalAlignment="Center">
+                                                <TextBlock Style="{StaticResource Text.Body}" Text="{Binding ElapsedPercentDisplay}" />
+                                                <TextBlock Style="{StaticResource Text.Label}" Text="{Binding [Card.Elapsed], Source={StaticResource Loc}}" />
+                                            </StackPanel>
+                                            <TextBlock x:Name="ArchivedAtLabel"
+                                                       VerticalAlignment="Center"
+                                                       Style="{StaticResource Text.Label}"
+                                                       Text="{Binding ArchivedAtDisplay}"
+                                                       Visibility="Collapsed" />
+
+                                            <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center" Orientation="Horizontal">
+                                                <ToggleButton x:Name="PinButton"
+                                                              IsChecked="{Binding IsPinned, Mode=OneWay}"
+                                                              Checked="PinButton_OnToggled"
+                                                              Unchecked="PinButton_OnToggled"
+                                                              AutomationProperties.Name="{Binding [Card.Action.Pin], Source={StaticResource Loc}}">
+                                                    <ToggleButton.Style>
+                                                        <Style TargetType="ToggleButton" BasedOn="{StaticResource Button.CardAction}">
+                                                            <Style.Triggers>
+                                                                <Trigger Property="IsChecked" Value="True">
+                                                                    <Setter Property="ToolTip" Value="{DynamicResource CardUnpinToolTip}" />
+                                                                </Trigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </ToggleButton.Style>
+                                                    <Path Style="{StaticResource Glyph.Icon}"
+                                                          Data="M 5.5 2 L 10.5 2 M 6.5 2 L 6.5 6.5 L 4 9.5 L 12 9.5 L 9.5 6.5 L 9.5 2 M 8 9.5 L 8 14.5" />
+                                                </ToggleButton>
+                                                <Button x:Name="ArchiveButton"
+                                                        Margin="4,0,0,0"
+                                                        Style="{StaticResource Button.CardAction}"
+                                                        Click="ArchiveCountdown_Click"
+                                                        AutomationProperties.Name="{Binding [Card.Action.Archive], Source={StaticResource Loc}}">
+                                                    <Path Style="{StaticResource Glyph.Icon}"
+                                                          Data="M 1.5 3 L 14.5 3 L 14.5 6 L 1.5 6 Z M 2.5 6 L 2.5 13.5 L 13.5 13.5 L 13.5 6 M 6 9 L 10 9" />
+                                                </Button>
+                                                <Button x:Name="EditButton"
+                                                        Margin="4,0,0,0"
+                                                        Style="{StaticResource Button.CardAction}"
+                                                        Click="EditCountdown_Click"
+                                                        AutomationProperties.Name="{Binding [Card.Action.Edit], Source={StaticResource Loc}}">
+                                                    <Path Style="{StaticResource Glyph.Icon}"
+                                                          Data="M 11 2.5 L 13.5 5 L 5.5 13 L 2.5 13.5 L 3 10.5 Z M 9.5 4 L 12 6.5" />
+                                                </Button>
+                                                <Button x:Name="RestoreButton"
+                                                        Visibility="Collapsed"
+                                                        Style="{StaticResource Button.CardAction}"
+                                                        Click="RestoreCountdown_Click"
+                                                        AutomationProperties.Name="{Binding [Card.Action.Restore], Source={StaticResource Loc}}">
+                                                    <Path Style="{StaticResource Glyph.Icon}"
+                                                          Data="M 5.5 2.5 L 2.5 5.5 L 5.5 8.5 M 2.5 5.5 L 10 5.5 A 3.75 3.75 0 0 1 10 13 L 6 13" />
+                                                </Button>
+                                                <!-- Set apart from the others: it cannot be undone. -->
+                                                <Button x:Name="DeleteButton"
+                                                        Margin="12,0,0,0"
+                                                        Style="{StaticResource Button.CardAction}"
+                                                        Click="DeleteCountdown_Click"
+                                                        AutomationProperties.Name="{Binding [Card.Action.Delete], Source={StaticResource Loc}}">
+                                                    <Path Style="{StaticResource Glyph.Icon}"
+                                                          Data="M 2.5 4.5 L 13.5 4.5 M 6 4.5 L 6 2.5 L 10 2.5 L 10 4.5 M 4 4.5 L 4.8 14 L 11.2 14 L 12 4.5 M 6.8 7 L 6.8 11.5 M 9.2 7 L 9.2 11.5" />
+                                                </Button>
+                                            </StackPanel>
+                                        </Grid>
                                     </StackPanel>
                                 </Grid>
 
-                                <!-- Cigar (only when not archived) -->
-                                <controls:CigarCountdown x:Name="CigarBar"
-                                                         Margin="0,12,0,0"
-                                                         Height="118"
-                                                         Progress="{Binding ProgressFraction}"
-                                                         AccentBrush="{Binding StatusAccentBrush}" />
+                                <DataTemplate.Triggers>
+                                    <DataTrigger Binding="{Binding IsArchived}" Value="True">
+                                        <Setter TargetName="Cigar" Property="Visibility" Value="Collapsed" />
+                                        <Setter TargetName="Stamp" Property="Visibility" Value="Visible" />
+                                        <Setter TargetName="ElapsedBlock" Property="Visibility" Value="Collapsed" />
+                                        <Setter TargetName="ArchivedAtLabel" Property="Visibility" Value="Visible" />
+                                        <Setter TargetName="PinButton" Property="Visibility" Value="Collapsed" />
+                                        <Setter TargetName="ArchiveButton" Property="Visibility" Value="Collapsed" />
+                                        <Setter TargetName="EditButton" Property="Visibility" Value="Collapsed" />
+                                        <Setter TargetName="RestoreButton" Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                    <Trigger SourceName="Card" Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="CardWash" Property="Opacity" Value="0.6" />
+                                    </Trigger>
+                                    <Trigger SourceName="Card" Property="IsKeyboardFocusWithin" Value="True">
+                                        <Setter TargetName="CardWash" Property="Opacity" Value="0.6" />
+                                    </Trigger>
+                                </DataTemplate.Triggers>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Grid>
 
-                                <!-- Postal cancellation stamp (only when archived) -->
-                                <Grid x:Name="ArchiveStamp"
-                                      Margin="0,16,0,8"
-                                      Height="138"
-                                      Visibility="Collapsed">
-                                    <controls:PostalStamp HorizontalAlignment="Center"
-                                                          VerticalAlignment="Center"
-                                                          Width="138"
-                                                          Height="138"
-                                                          Opacity="0.88"
-                                                          Stroke="{StaticResource StatusUrgentBrush}"
-                                                          StampFontFamily="{StaticResource SerifFont}"
-                                                          TopText="{Binding ArchiveStampTopLabel}"
-                                                          BottomText="{Binding ArchiveStampBottomLabel}"
-                                                          DateText="{Binding ArchiveStampDateLabel}">
-                                        <controls:PostalStamp.LayoutTransform>
-                                            <RotateTransform Angle="-7" />
-                                        </controls:PostalStamp.LayoutTransform>
-                                    </controls:PostalStamp>
-                                </Grid>
+                <!-- Footer: counts, save problems and short notices, all announced politely -->
+                <StackPanel Grid.Row="4" Margin="24,8,24,16">
+                    <Border Height="1" Margin="0,0,0,8" Background="{DynamicResource PaperEdgeBrush}" />
+                    <TextBlock Style="{StaticResource Text.Caption}"
+                               Text="{Binding SummaryText, NotifyOnTargetUpdated=True}"
+                               TargetUpdated="LiveRegion_OnTargetUpdated"
+                               AutomationProperties.LiveSetting="Polite" />
+                    <TextBlock Margin="0,4,0,0"
+                               Style="{StaticResource Text.Error}"
+                               Text="{Binding [Main.SaveError], Source={StaticResource Loc}}"
+                               AutomationProperties.LiveSetting="Polite"
+                               IsVisibleChanged="LiveRegion_OnIsVisibleChanged"
+                               Visibility="{Binding HasSaveError, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <TextBlock x:Name="StatusMessageLabel"
+                               Margin="0,4,0,0"
+                               Style="{StaticResource Text.Error}"
+                               AutomationProperties.LiveSetting="Polite"
+                               Visibility="Collapsed" />
+                </StackPanel>
 
-                                <Grid Margin="0,4,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0" HorizontalAlignment="Left" x:Name="LapsedBlock">
-                                        <TextBlock FontFamily="{StaticResource SerifFont}"
-                                                   FontSize="{Binding Path=(controls:UiScale.FontScale), RelativeSource={RelativeSource Self}, Converter={StaticResource ScaledFontSize}, ConverterParameter=13}"
-                                                   Foreground="{StaticResource InkBrush}"
-                                                   Text="{Binding LapsedPercentDisplay}" />
-                                        <TextBlock Style="{StaticResource SmallCapsLabel}"
-                                                   Text="{Binding LapsedLabel}" />
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="1"
-                                                x:Name="ActionRow"
-                                                Orientation="Horizontal"
-                                                HorizontalAlignment="Center"
-                                                Opacity="0.35">
-                                        <Button Style="{StaticResource CardActionIconButton}"
-                                                Click="ArchiveCountdown_Click"
-                                                ToolTip="{Binding ArchiveActionTooltip}"
-                                                Visibility="{Binding IsArchived, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
-                                            <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                                  StrokeThickness="1.1"
-                                                  Fill="Transparent"
-                                                  Data="M 2 3 L 14 3 L 14 6 L 2 6 Z M 3 6 L 13 6 L 13 14 L 3 14 Z M 6 9 L 10 9" />
-                                        </Button>
-                                        <Button Style="{StaticResource CardActionIconButton}"
-                                                Click="EditCountdown_Click"
-                                                ToolTip="{Binding [Common.Edit], Source={StaticResource Loc}}"
-                                                Visibility="{Binding IsArchived, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
-                                            <!-- Fountain pen / quill -->
-                                            <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                                  StrokeThickness="1.1"
-                                                  StrokeLineJoin="Round"
-                                                  Fill="Transparent"
-                                                  Data="M 12 2 L 14 4 L 6 12 L 3 13 L 4 10 Z M 4 10 L 6 12 M 11 3 L 13 5" />
-                                        </Button>
-                                        <Button Style="{StaticResource CardActionIconButton}"
-                                                Click="RestoreCountdown_Click"
-                                                ToolTip="{Binding RestoreActionTooltip}"
-                                                Visibility="{Binding IsArchived, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                                  StrokeThickness="1.1"
-                                                  Fill="Transparent"
-                                                  Data="M 3 8 A 5 5 0 1 0 5 4 L 3 4 M 3 4 L 3 1 M 3 4 L 6 4" />
-                                        </Button>
-                                        <Button Style="{StaticResource CardActionIconButton}"
-                                                Click="DeleteCountdown_Click"
-                                                ToolTip="{Binding [Common.Delete], Source={StaticResource Loc}}">
-                                            <!-- Trash can -->
-                                            <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                                  StrokeThickness="1.1"
-                                                  StrokeLineJoin="Round"
-                                                  Fill="Transparent"
-                                                  Data="M 4 5 L 12 5 L 11 14 L 5 14 Z M 3 5 L 13 5 M 6 4 L 10 4 L 10 5 L 6 5 Z M 7 8 L 7 12 M 9 8 L 9 12" />
-                                        </Button>
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="2" HorizontalAlignment="Right">
-                                        <TextBlock Style="{StaticResource SmallCapsLabel}"
-                                                   HorizontalAlignment="Right"
-                                                   Text="{Binding ArchivedAtDisplay}"
-                                                   Visibility="{Binding IsArchived, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                    </StackPanel>
-                                </Grid>
-
-                                <Border Height="1" Margin="0,14,0,0" Background="{StaticResource RuleBrush}" Opacity="0.4" />
-                            </StackPanel>
-                        </Grid>
-                        <DataTemplate.Triggers>
-                            <DataTrigger Binding="{Binding IsArchived}" Value="True">
-                                <Setter TargetName="CigarBar" Property="Visibility" Value="Collapsed" />
-                                <Setter TargetName="ArchiveStamp" Property="Visibility" Value="Visible" />
-                                <Setter TargetName="LapsedBlock" Property="Visibility" Value="Hidden" />
-                            </DataTrigger>
-                            <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource Self}}" Value="True">
-                                <Setter TargetName="ActionRow" Property="Opacity" Value="1" />
-                                <Setter TargetName="CardBg" Property="Background" Value="#10A08850" />
-                            </DataTrigger>
-                        </DataTemplate.Triggers>
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
-
-            <Grid Grid.Row="5" Margin="40,12,40,16">
-                <TextBlock Style="{StaticResource SmallCapsLabel}" Text="{Binding SummaryText}" />
+                <!-- Resize affordance in the sheet's own corner. It lies inside the 16 DIP square
+                     that WindowPlacement.HitTestResizeBorder resizes from, so grabbing it resizes. -->
+                <Path Grid.Row="0"
+                      Grid.RowSpan="5"
+                      Margin="0,0,4,4"
+                      HorizontalAlignment="Right"
+                      VerticalAlignment="Bottom"
+                      Data="M 10 2 L 2 10 M 10 6 L 6 10"
+                      Stroke="{DynamicResource InkFaintBrush}"
+                      StrokeThickness="1"
+                      StrokeStartLineCap="Round"
+                      StrokeEndLineCap="Round"
+                      IsHitTestVisible="False"
+                      SnapsToDevicePixels="True" />
             </Grid>
         </Grid>
-    </Border>
+    </Grid>
 </Window>

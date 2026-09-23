@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  MSIX manifest template. scripts\Publish-MSIX.ps1 fills in the Identity attributes (Version from
+  Directory.Build.props, Publisher from the signing certificate, ProcessorArchitecture from the runtime
+  identifier) and refuses to package while any placeholder is left.
+  Logos are referenced by base name: the scale-* and targetsize-* files in Assets come from
+  scripts\Generate-AppAssets.ps1 and are resolved through the resources.pri built at packaging time.
+-->
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
@@ -9,15 +16,16 @@
     Name="SimpleTimeCountdown.Desktop"
     Publisher="__PUBLISHER__"
     Version="__VERSION__"
-    ProcessorArchitecture="x64" />
+    ProcessorArchitecture="__ARCHITECTURE__" />
   <Properties>
     <DisplayName>Simple Time Countdown</DisplayName>
     <PublisherDisplayName>Simple Time Countdown</PublisherDisplayName>
-    <Description>Floating desktop countdown panel for Windows 11.</Description>
+    <Description>Floating desktop countdown panel for Windows.</Description>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
   <Resources>
     <Resource Language="en-us" />
+    <Resource Language="zh-cn" />
   </Resources>
   <Dependencies>
     <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
@@ -26,19 +34,21 @@
     <Application Id="TimeCountdown"
                  Executable="TimeCountdown.exe"
                  EntryPoint="Windows.FullTrustApplication">
+      <!-- #F0E6D2 is the Casebook Paper colour, the same background the wide tile and splash images are drawn on. -->
       <uap:VisualElements
         DisplayName="Simple Time Countdown"
         Description="Floating desktop countdown panel"
-        BackgroundColor="transparent"
+        BackgroundColor="#F0E6D2"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">
         <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
-        <uap:SplashScreen Image="Assets\SplashScreen.png" BackgroundColor="#E9F3FF" />
+        <uap:SplashScreen Image="Assets\SplashScreen.png" BackgroundColor="#F0E6D2" />
       </uap:VisualElements>
       <Extensions>
-        <desktop:Extension Category="windows.fullTrustProcess" Executable="TimeCountdown.exe" />
+        <!-- Off until the user opts in, as with the Setup.exe build. The app's settings open Windows'
+             Startup apps page, where this task is switched on or off. -->
         <desktop:Extension Category="windows.startupTask" Executable="TimeCountdown.exe" EntryPoint="Windows.FullTrustApplication">
-          <desktop:StartupTask TaskId="SimpleTimeCountdownStartup" Enabled="true" DisplayName="Simple Time Countdown" />
+          <desktop:StartupTask TaskId="SimpleTimeCountdownStartup" Enabled="false" DisplayName="Simple Time Countdown" />
         </desktop:Extension>
       </Extensions>
     </Application>

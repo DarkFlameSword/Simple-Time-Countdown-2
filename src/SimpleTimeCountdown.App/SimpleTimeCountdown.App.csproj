@@ -3,26 +3,33 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <!-- Only for the notification-area icon (NotifyIcon) and its menu. -->
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>TimeCountdown</AssemblyName>
     <RootNamespace>TimeCountdown</RootNamespace>
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
+    <!-- DPI awareness is declared in the manifest, the only place WPF reads it. The WinForms
+         ApplicationHighDpiMode property (and analyzer WFAC010, which recommends it) only apply to
+         WinForms' own startup code, which this WPF app never runs. -->
     <ApplicationManifest>Properties\app.manifest</ApplicationManifest>
+    <NoWarn>$(NoWarn);WFAC010</NoWarn>
     <Company>Simple Time Countdown</Company>
     <Product>Simple Time Countdown</Product>
     <Title>Simple Time Countdown</Title>
-    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <PublishSingleFile>false</PublishSingleFile>
     <SelfContained>true</SelfContained>
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Names the installer relies on (uninstaller path, autostart value, data folder, exit request). -->
+    <Compile Include="..\Shared\ProductConstants.cs" Link="Shared\ProductConstants.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Read at runtime for the tray icon, and the target of the installer's shortcuts. -->
     <Content Include="Assets\AppIcon.ico">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Assets\AppIcon-256.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>

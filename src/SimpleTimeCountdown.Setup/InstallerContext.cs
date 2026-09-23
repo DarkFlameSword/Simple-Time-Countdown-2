@@ -1,289 +1,226 @@
-using System.IO.Compression;
 using System.Reflection;
+using System.Security.Principal;
 using Microsoft.Win32;
 
 namespace TimeCountdown.Setup;
 
-internal static class InstallerContext
+/// <summary>
+/// Everything about the current user's machine that the engine reads or writes: known folders,
+/// the registry root and a few timeouts. An instance is immutable; production code uses
+/// <see cref="ForCurrentUser"/>, while tests point every root at a scratch folder and a scratch
+/// registry key so they never touch a real installation.
+/// </summary>
+internal sealed class InstallerContext
 {
-    public const string ProductName = "Simple Time Countdown";
-    private static long? _payloadInstalledSize;
-    private const string LegacyProductName = "Time Countdown";
-    private const string AppExecutableName = "TimeCountdown.exe";
-    private const string AppAssetsDirectoryName = "Assets";
-    private const string AppIconFileName = "AppIcon.ico";
-    private const string InstallerExecutableName = "Simple Time Countdown Setup.exe";
-    private const string InstallerDirectoryName = "Installer";
-    public const string InstallMarkerFileName = ".timecountdown-install";
-    private static readonly string DefaultInstallRootPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "Programs",
-        LegacyProductName);
-    private static string _installRoot = ResolveCurrentInstallRoot();
+    public const string ProductName = ProductConstants.ProductName;
 
-    public static string ProductVersion =>
-        Assembly.GetExecutingAssembly()
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
-            .InformationalVersion ?? "2.0.0";
+    /// <summary>Folder name of installs made by Setup 2.0 and earlier, still found through the registry.</summary>
+    public const string LegacyProductFolderName = "Time Countdown";
 
+    public const string UninstallKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\TimeCountdown";
+    public const string RunOnceKeyPath = @"Software\Microsoft\Windows\CurrentVersion\RunOnce";
+
+    /// <summary>
+    /// RunOnce value written by Setup 2.0's uninstaller. It ran <c>rmdir /s /q</c> on the install
+    /// folder at the next sign-in, so it must be removed before anything is installed there again.
+    /// </summary>
+    public const string LegacyCleanupRunOnceValueName = "!SimpleTimeCountdownCleanup";
+
+    public required string LocalAppData { get; init; }
+
+    public required string RoamingAppData { get; init; }
+
+    public required string UserProfile { get; init; }
+
+    public required string DesktopDirectory { get; init; }
+
+    /// <summary>The user's Start menu "Programs" folder.</summary>
+    public required string StartMenuPrograms { get; init; }
+
+    public required string TempDirectory { get; init; }
+
+    /// <summary>HKEY_CURRENT_USER in production; a scratch key in tests.</summary>
+    public required RegistryKey RegistryRoot { get; init; }
+
+    /// <summary>Path of the running setup executable (null when unknown).</summary>
+    public string? CurrentExecutablePath { get; init; }
+
+    public string ExitRequestEventName { get; init; } = ProductConstants.ExitRequestEventName;
+
+    /// <summary>How long a running app gets to save and exit before it is terminated.</summary>
+    public TimeSpan GracefulExitTimeout { get; init; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>Folders that must never be used as, or contain, an install folder (see <see cref="IsProtectedDirectory"/>).</summary>
+    public IReadOnlyList<string> ProtectedDirectories { get; init; } = [];
+
+    /// <summary>Folders an install folder must never be inside (Windows, Program Files, %TEMP%).</summary>
+    public IReadOnlyList<string> ForbiddenParentDirectories { get; init; } = [];
+
+    // Declared before ProductVersion: static initializers run in order and the version falls back to it.
+    public static Version AssemblyVersion { get; } =
+        Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0);
+
+    public static string ProductVersion { get; } = ReadProductVersion();
+
+    /// <summary>The version without the "+commit" build metadata the SDK appends.</summary>
     public static string ProductDisplayVersion
     {
         get
         {
-            var version = ProductVersion;
-            var metadataSeparator = version.IndexOf('+');
-            return metadataSeparator >= 0 ? version[..metadataSeparator] : version;
+            var separator = ProductVersion.IndexOf('+');
+            return separator >= 0 ? ProductVersion[..separator] : ProductVersion;
         }
     }
 
     /// <summary>
-    /// Total uncompressed size of the embedded payload — i.e. how much disk the
-    /// app will occupy after install. Cached on first read. Returns 0 if the
-    /// payload is missing (e.g. when running setup without packed payload).
+    /// True when Setup runs with an elevated administrator token. This installer is per-user, so
+    /// elevation is never needed; the app it starts is de-elevated (see InstallerEngine).
     /// </summary>
-    public static long PayloadInstalledSizeBytes => _payloadInstalledSize ??= ComputePayloadInstalledSize();
-
-    public static string PayloadInstalledSizeDisplay
+    public static bool IsElevated
     {
         get
         {
-            var bytes = PayloadInstalledSizeBytes;
-            if (bytes <= 0) return "—";
-            const double kib = 1024.0;
-            const double mib = kib * 1024.0;
-            const double gib = mib * 1024.0;
-            if (bytes < mib) return $"{bytes / kib:0.#} KB";
-            if (bytes < gib) return $"{bytes / mib:0.#} MB";
-            return $"{bytes / gib:0.##} GB";
+            using var identity = WindowsIdentity.GetCurrent();
+            return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
         }
     }
 
-    private static long ComputePayloadInstalledSize()
-    {
-        var assembly = Assembly.GetExecutingAssembly();
-        var resourceName = assembly.GetManifestResourceNames()
-            .FirstOrDefault(n => n.EndsWith("TimeCountdown-portable.zip", StringComparison.OrdinalIgnoreCase));
-        if (resourceName is null) return 0;
+    public string DefaultInstallRoot => Path.Combine(LocalAppData, "Programs", ProductName);
 
-        try
-        {
-            using var stream = assembly.GetManifestResourceStream(resourceName);
-            if (stream is null) return 0;
-            using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
-            return archive.Entries.Sum(e => e.Length);
-        }
-        catch
-        {
-            return 0;
-        }
-    }
+    public string LegacyDefaultInstallRoot => Path.Combine(LocalAppData, "Programs", LegacyProductFolderName);
 
-    public static string InstallRoot => _installRoot;
+    public string StartMenuDirectory => Path.Combine(StartMenuPrograms, ProductName);
 
-    public static string DefaultInstallRoot => DefaultInstallRootPath;
+    public string LegacyStartMenuDirectory => Path.Combine(StartMenuPrograms, LegacyProductFolderName);
 
-    public static string InstallerDirectory => Path.Combine(InstallRoot, InstallerDirectoryName);
+    public string AppShortcutPath => Path.Combine(StartMenuDirectory, $"{ProductName}.lnk");
 
-    public static string AppExecutablePath => Path.Combine(InstallRoot, AppExecutableName);
+    public string UninstallShortcutPath => Path.Combine(StartMenuDirectory, $"Uninstall {ProductName}.lnk");
 
-    public static string InstallMarkerPath => Path.Combine(InstallRoot, InstallMarkerFileName);
+    public string DesktopShortcutPath => Path.Combine(DesktopDirectory, $"{ProductName}.lnk");
 
-    public static string InstallerExecutablePath => Path.Combine(InstallerDirectory, InstallerExecutableName);
-
-    public static string AppShortcutIconPath => Path.Combine(InstallRoot, AppAssetsDirectoryName, AppIconFileName);
-
-    public static string InstallerShortcutIconPath => InstallerExecutablePath;
-
-    public static string LocalDataDirectory => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "TimeCountdown");
-
-    public static string StartMenuDirectory => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "Microsoft",
-        "Windows",
-        "Start Menu",
-        "Programs",
-        ProductName);
-
-    public static string LegacyStartMenuDirectory => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "Microsoft",
-        "Windows",
-        "Start Menu",
-        "Programs",
-        LegacyProductName);
-
-    public static string DesktopShortcutPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
-        $"{ProductName}.lnk");
-
-    public static string LegacyDesktopShortcutPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
-        $"{LegacyProductName}.lnk");
-
-    public static string UninstallRegistryPath => @"Software\Microsoft\Windows\CurrentVersion\Uninstall\TimeCountdown";
-
-    public static string AutostartRegistryPath => @"Software\Microsoft\Windows\CurrentVersion\Run";
-
-    public static string AutostartRegistryValueName => "TimeCountdown";
-
-    public static string CleanupRunOnceRegistryPath => @"Software\Microsoft\Windows\CurrentVersion\RunOnce";
-
-    public static string CleanupRunOnceRegistryValueName => "!SimpleTimeCountdownCleanup";
-
-    public static bool IsInstalled => IsInstalledAt(InstallRoot);
-
-    public static bool IsInstalledAt(string installRoot)
-    {
-        if (string.IsNullOrWhiteSpace(installRoot))
-        {
-            return false;
-        }
-
-        var normalizedRoot = Path.GetFullPath(Environment.ExpandEnvironmentVariables(installRoot.Trim()));
-        return File.Exists(Path.Combine(normalizedRoot, AppExecutableName));
-    }
-
-    public static bool IsInstallRootSafeForRemoval(string installRoot)
-    {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(installRoot))
-            {
-                return false;
-            }
-
-            var normalizedRoot = NormalizeDirectoryPath(installRoot);
-            if (!Directory.Exists(normalizedRoot) || IsProtectedDirectory(normalizedRoot))
-            {
-                return false;
-            }
-
-            var markerPath = Path.Combine(normalizedRoot, InstallMarkerFileName);
-            if (!File.Exists(markerPath))
-            {
-                return false;
-            }
-
-            var marker = File.ReadAllText(markerPath).Trim();
-            if (!marker.Equals(ProductName, StringComparison.OrdinalIgnoreCase) &&
-                !marker.StartsWith($"{ProductName} ", StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            return File.Exists(Path.Combine(normalizedRoot, AppExecutableName)) &&
-                   File.Exists(Path.Combine(normalizedRoot, InstallerDirectoryName, InstallerExecutableName));
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    public static IReadOnlyList<string> AllDesktopShortcutPaths =>
+    /// <summary>Shortcuts that older versions created; removed only when they point into the install being removed.</summary>
+    public IReadOnlyList<string> LegacyShortcutPaths =>
     [
-        DesktopShortcutPath,
-        LegacyDesktopShortcutPath
+        Path.Combine(DesktopDirectory, $"{LegacyProductFolderName}.lnk"),
+        Path.Combine(LegacyStartMenuDirectory, $"{LegacyProductFolderName}.lnk"),
+        Path.Combine(LegacyStartMenuDirectory, $"{ProductName}.lnk"),
+        Path.Combine(LegacyStartMenuDirectory, $"Uninstall {ProductName}.lnk"),
+        Path.Combine(LegacyStartMenuDirectory, $"Uninstall {LegacyProductFolderName}.lnk")
     ];
 
-    public static IReadOnlyList<string> AllStartMenuDirectories =>
-    [
-        StartMenuDirectory,
-        LegacyStartMenuDirectory
-    ];
+    /// <summary>The app's countdowns and settings (%AppData%\TimeCountdown).</summary>
+    public string RoamingDataDirectory => Path.Combine(RoamingAppData, ProductConstants.DataFolderName);
 
-    public static void SetInstallRoot(string installRoot)
+    /// <summary>The app's logs (%LocalAppData%\TimeCountdown).</summary>
+    public string LocalDataDirectory => Path.Combine(LocalAppData, ProductConstants.DataFolderName);
+
+    public static InstallerContext ForCurrentUser()
     {
-        if (string.IsNullOrWhiteSpace(installRoot))
-        {
-            _installRoot = DefaultInstallRootPath;
-            return;
-        }
+        static string Known(Environment.SpecialFolder folder) =>
+            Environment.GetFolderPath(folder, Environment.SpecialFolderOption.DoNotVerify);
 
-        _installRoot = Path.GetFullPath(Environment.ExpandEnvironmentVariables(installRoot.Trim()));
+        var userProfile = Known(Environment.SpecialFolder.UserProfile);
+        var localAppData = Known(Environment.SpecialFolder.LocalApplicationData);
+        var roamingAppData = Known(Environment.SpecialFolder.ApplicationData);
+        var temp = Path.GetTempPath();
+
+        string?[] protectedDirectories =
+        [
+            userProfile,
+            Path.GetDirectoryName(userProfile),
+            userProfile.Length > 0 ? Path.Combine(userProfile, "Downloads") : null,
+            Known(Environment.SpecialFolder.DesktopDirectory),
+            Known(Environment.SpecialFolder.MyDocuments),
+            Known(Environment.SpecialFolder.MyMusic),
+            Known(Environment.SpecialFolder.MyPictures),
+            Known(Environment.SpecialFolder.MyVideos),
+            Known(Environment.SpecialFolder.Favorites),
+            Known(Environment.SpecialFolder.StartMenu),
+            Known(Environment.SpecialFolder.CommonDesktopDirectory),
+            Known(Environment.SpecialFolder.CommonDocuments),
+            Known(Environment.SpecialFolder.CommonApplicationData),
+            roamingAppData,
+            localAppData,
+            Path.Combine(localAppData, "Programs"),
+            Environment.GetEnvironmentVariable("OneDrive"),
+            Environment.GetEnvironmentVariable("OneDriveConsumer"),
+            Environment.GetEnvironmentVariable("OneDriveCommercial")
+        ];
+
+        string?[] forbiddenParents =
+        [
+            Known(Environment.SpecialFolder.Windows),
+            Known(Environment.SpecialFolder.ProgramFiles),
+            Known(Environment.SpecialFolder.ProgramFilesX86),
+            temp
+        ];
+
+        return new InstallerContext
+        {
+            LocalAppData = localAppData,
+            RoamingAppData = roamingAppData,
+            UserProfile = userProfile,
+            DesktopDirectory = Known(Environment.SpecialFolder.DesktopDirectory),
+            StartMenuPrograms = Known(Environment.SpecialFolder.Programs),
+            TempDirectory = temp,
+            RegistryRoot = Registry.CurrentUser,
+            CurrentExecutablePath = Environment.ProcessPath,
+            ProtectedDirectories = WithoutBlanks(protectedDirectories),
+            ForbiddenParentDirectories = WithoutBlanks(forbiddenParents)
+        };
     }
 
-    private static string ResolveCurrentInstallRoot()
+    /// <summary>
+    /// True for drive roots, for the folders in <see cref="ProtectedDirectories"/> and their
+    /// parents (installing into C:\Users\me\AppData would put the program next to every
+    /// other app's data), and for anything inside <see cref="ForbiddenParentDirectories"/>.
+    /// </summary>
+    public bool IsProtectedDirectory(string directory)
+    {
+        var path = PathUtilities.Normalize(directory);
+        if (PathUtilities.IsDriveOrShareRoot(path))
+        {
+            return true;
+        }
+
+        return ProtectedDirectories.Any(protectedDirectory => PathUtilities.IsSameOrUnder(protectedDirectory, path)) ||
+               ForbiddenParentDirectories.Any(parent => PathUtilities.IsSameOrUnder(path, parent));
+    }
+
+    /// <summary>Reads the Settings &gt; Apps entry this installer writes, if there is one.</summary>
+    public RegisteredInstall? ReadRegisteredInstall()
     {
         try
         {
-            using var key = Registry.CurrentUser.OpenSubKey(UninstallRegistryPath);
-            var installLocation = key?.GetValue("InstallLocation") as string;
-            if (!string.IsNullOrWhiteSpace(installLocation))
-            {
-                return Path.GetFullPath(installLocation);
-            }
-        }
-        catch
-        {
-        }
-
-        return TryResolveInstallRootFromCurrentProcess() ?? DefaultInstallRootPath;
-    }
-
-    private static string? TryResolveInstallRootFromCurrentProcess()
-    {
-        try
-        {
-            var processPath = Environment.ProcessPath;
-            if (string.IsNullOrWhiteSpace(processPath))
+            using var key = RegistryRoot.OpenSubKey(UninstallKeyPath);
+            if (key?.GetValue("InstallLocation") is not string location || string.IsNullOrWhiteSpace(location))
             {
                 return null;
             }
 
-            var executable = new FileInfo(processPath);
-            var installerDirectory = executable.Directory;
-            if (installerDirectory is null ||
-                !string.Equals(executable.Name, InstallerExecutableName, StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(installerDirectory.Name, InstallerDirectoryName, StringComparison.OrdinalIgnoreCase) ||
-                installerDirectory.Parent is null)
-            {
-                return null;
-            }
-
-            var installRoot = NormalizeDirectoryPath(installerDirectory.Parent.FullName);
-            return IsInstallRootSafeForRemoval(installRoot)
-                ? installRoot
-                : null;
+            return new RegisteredInstall(
+                PathUtilities.Normalize(location),
+                key.GetValue("DisplayVersion") as string);
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException
+                                       or System.Security.SecurityException)
         {
             return null;
         }
     }
 
-    private static string NormalizeDirectoryPath(string path)
-    {
-        return Path.GetFullPath(Environment.ExpandEnvironmentVariables(path.Trim()))
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-    }
+    private static string[] WithoutBlanks(IEnumerable<string?> paths) =>
+        paths.Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Select(static path => PathUtilities.Normalize(path!))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
-    private static bool IsProtectedDirectory(string path)
-    {
-        var normalizedPath = NormalizeDirectoryPath(path);
-        var root = Path.GetPathRoot(normalizedPath);
-        if (!string.IsNullOrWhiteSpace(root) &&
-            string.Equals(normalizedPath, root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        var protectedDirectories = new[]
-        {
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86)
-        };
-
-        return protectedDirectories
-            .Where(static directory => !string.IsNullOrWhiteSpace(directory))
-            .Select(NormalizeDirectoryPath)
-            .Any(directory => string.Equals(normalizedPath, directory, StringComparison.OrdinalIgnoreCase));
-    }
+    private static string ReadProductVersion() =>
+        Assembly.GetExecutingAssembly()
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion ?? AssemblyVersion.ToString(3);
 }
+
+/// <summary>The install location and version recorded in Settings &gt; Apps.</summary>
+internal sealed record RegisteredInstall(string InstallRoot, string? DisplayVersion);

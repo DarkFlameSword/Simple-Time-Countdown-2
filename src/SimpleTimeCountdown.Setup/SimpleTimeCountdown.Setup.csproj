@@ -17,10 +17,111 @@
     <SelfContained>true</SelfContained>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!-- Setup is English and Simplified Chinese only; skip the framework's other satellite assemblies. -->
+    <SatelliteResourceLanguages>en;zh-Hans</SatelliteResourceLanguages>
+    <!-- The zip produced by scripts\Build-SetupExe.ps1 (the published app); override with -p:InstallerPayloadZip=... -->
+    <InstallerPayloadZip Condition="'$(InstallerPayloadZip)' == ''">$(MSBuildThisFileDirectory)..\..\artifacts\installer-payload\TimeCountdown-portable.zip</InstallerPayloadZip>
   </PropertyGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="..\..\artifacts\installer-payload\TimeCountdown-portable.zip" Link="Payload\TimeCountdown-portable.zip" Condition="Exists('..\..\artifacts\installer-payload\TimeCountdown-portable.zip')" />
+    <Compile Include="..\Shared\ProductConstants.cs" Link="Shared\ProductConstants.cs" />
     <EmbeddedResource Include="..\SimpleTimeCountdown.App\Assets\AppIcon-256.png" Link="Assets\AppIcon-256.png" />
+    <InternalsVisibleTo Include="SimpleTimeCountdown.Tests" />
   </ItemGroup>
+
+  <!--
+    The program files are not an embedded resource: after publishing, they are appended to the
+    single-file executable (see EmbeddedPayload.cs for the layout). The uninstaller Setup leaves in
+    the installation is then this executable without the appended part, instead of a second full
+    copy of the program files, and the zip is not compressed a second time by the bundler.
+    Sign the executable after this step (Build-SetupExe.ps1 does): the signature then covers the payload.
+  -->
+  <Target Name="CheckInstallerPayload" BeforeTargets="PrepareForPublish">
+    <Error Condition="!Exists('$(InstallerPayloadZip)') And '$(Configuration)' == 'Release'"
+           Text="The installer payload $(InstallerPayloadZip) is missing, so this setup could not install anything. Build the setup with scripts\Build-SetupExe.ps1, which publishes the app first." />
+    <Warning Condition="!Exists('$(InstallerPayloadZip)') And '$(Configuration)' != 'Release'"
+             Text="The installer payload $(InstallerPayloadZip) is missing; this setup can only uninstall. Use scripts\Build-SetupExe.ps1 to build an installer." />
+    <Error Condition="Exists('$(InstallerPayloadZip)') And '$(PublishSingleFile)' != 'true'"
+           Text="The installer payload can only be appended to a single-file publish (PublishSingleFile=true)." />
+  </Target>
+
+  <Target Name="AppendInstallerPayload" AfterTargets="Publish" Condition="Exists('$(InstallerPayloadZip)') And '$(PublishSingleFile)' == 'true'">
+    <AppendInstallerPayload Executable="$(PublishDir)$(AssemblyName).exe" Payload="$(InstallerPayloadZip)" />
+    <Message Importance="high" Text="Appended the installer payload $(InstallerPayloadZip) to $(PublishDir)$(AssemblyName).exe" />
+  </Target>
+
+  <UsingTask TaskName="AppendInstallerPayload" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <Executable ParameterType="System.String" Required="true" />
+      <Payload ParameterType="System.String" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System" />
+      <Using Namespace="System.IO" />
+      <Code Type="Method" Language="cs"><![CDATA[
+        public override bool Execute()
+        {
+            // Must match EmbeddedPayload.cs: [bundle][payload][zero padding][offset int64][length int64][magic]
+            var magic = System.Text.Encoding.ASCII.GetBytes("STC-PAYLOAD-V1\0\0");
+            using (var exe = new FileStream(Executable, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                var header = new byte[4096];
+                var headerLength = exe.Read(header, 0, header.Length);
+                var peOffset = BitConverter.ToInt32(header, 0x3C);
+                var optionalHeader = peOffset + 24;
+                var isPe32Plus = BitConverter.ToUInt16(header, optionalHeader) == 0x20B;
+                var securityEntry = optionalHeader + (isPe32Plus ? 112 : 96) + (4 * 8);
+                if (securityEntry + 8 > headerLength || BitConverter.ToUInt32(header, securityEntry + 4) != 0)
+                {
+                    Log.LogError(Executable + " is already signed or is not an executable. Publish into a clean folder and sign it after the payload is appended.");
+                    return false;
+                }
+
+                // An incremental publish may leave the previous output in place: drop the payload it already carries.
+                var bundleLength = exe.Length;
+                if (exe.Length >= 32)
+                {
+                    var trailer = new byte[32];
+                    exe.Position = exe.Length - 32;
+                    var read = 0;
+                    while (read < trailer.Length)
+                    {
+                        read += exe.Read(trailer, read, trailer.Length - read);
+                    }
+
+                    var hasTrailer = true;
+                    for (var i = 0; i < magic.Length; i++)
+                    {
+                        hasTrailer &= trailer[16 + i] == magic[i];
+                    }
+
+                    if (hasTrailer)
+                    {
+                        bundleLength = BitConverter.ToInt64(trailer, 0);
+                    }
+                }
+
+                exe.SetLength(bundleLength);
+                exe.Position = bundleLength;
+                using (var payload = File.OpenRead(Payload))
+                {
+                    payload.CopyTo(exe);
+                }
+
+                var payloadLength = exe.Length - bundleLength;
+
+                // Pad so the file length stays a multiple of 8: signing then appends its certificate
+                // table directly after the trailer, where the setup looks for it.
+                var padding = (int)((8 - ((exe.Length + 32) % 8)) % 8);
+                exe.Write(new byte[padding], 0, padding);
+                exe.Write(BitConverter.GetBytes(bundleLength), 0, 8);
+                exe.Write(BitConverter.GetBytes(payloadLength), 0, 8);
+                exe.Write(magic, 0, magic.Length);
+            }
+
+            return true;
+        }
+      ]]></Code>
+    </Task>
+  </UsingTask>
 </Project>

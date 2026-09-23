@@ -1,185 +1,327 @@
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Windows;
+using System.Windows.Automation.Peers;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Threading;
+using TimeCountdown.Controls;
 using TimeCountdown.Models;
-using TimeCountdown.Services;
+using Control = System.Windows.Controls.Control;
+using DataFormats = System.Windows.DataFormats;
+using DataObject = System.Windows.DataObject;
+using KeyEventArgs = System.Windows.Input.KeyEventArgs;
+using KeyEventHandler = System.Windows.Input.KeyEventHandler;
+using Point = System.Windows.Point;
+using Screen = System.Windows.Forms.Screen;
 
 namespace TimeCountdown.Views;
 
+/// <summary>
+/// Modal dialog that creates or edits a countdown. The form's state and rules live in
+/// <see cref="EditCountdownViewModel"/>; this class handles what needs the visual tree: moving
+/// focus to the field in error, announcing messages, notes and counters, flattening multi-line
+/// pastes, typed dates the date picker rejects, the Enter key in the date picker, a tooltip for a
+/// date too long for its field, and keeping the dialog inside the work area.
+/// </summary>
 public partial class EditCountdownWindow : Window
 {
-    private readonly LocalizationService _localization = LocalizationService.Instance;
-    private readonly AppSettings _settings;
-    private readonly CountdownItem? _existingItem;
+    private readonly EditCountdownViewModel _viewModel;
+
+    // The date picker's own text box, found once its template is applied.
+    private DatePickerTextBox? _dateTextBox;
+
+    // Set when the date picker rejects the typed text during the current key press.
+    private bool _typedDateRejected;
 
     public EditCountdownWindow(AppSettings settings, CountdownItem? existingItem = null)
     {
         InitializeComponent();
-        _settings = settings;
-        _existingItem = existingItem;
+        UiScale.FollowTextScale(this);
+        _viewModel = new EditCountdownViewModel(existingItem, settings.DefaultReminderMinutesBefore, settings.DefaultTimeZoneId);
+        _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        DataContext = _viewModel;
 
-        HourComboBox.ItemsSource = Enumerable.Range(0, 24).ToList();
-        MinuteComboBox.ItemsSource = Enumerable.Range(0, 60).ToList();
-        ReminderComboBox.ItemsSource = OptionCatalog.GetReminderOptions();
-        TimeZoneComboBox.ItemsSource = OptionCatalog.GetTimeZoneOptions(_localization.CurrentLanguageCode);
+        // The picker marks Enter handled once it has committed the typed date, which would stop
+        // Enter from reaching the default button; listen to handled events to save as every
+        // other field does.
+        DueDatePicker.AddHandler(Keyboard.KeyDownEvent, new KeyEventHandler(DueDatePicker_OnKeyDown), handledEventsToo: true);
 
-        LoadItem(existingItem);
+        Loaded += OnLoaded;
+        SizeChanged += OnSizeChanged;
     }
 
+    /// <summary>The countdown to save, set when the dialog closes with DialogResult true.</summary>
     public CountdownItem? Result { get; private set; }
 
-    private void LoadItem(CountdownItem? item)
+    protected override void OnSourceInitialized(EventArgs e)
     {
-        var effectiveItem = item ?? new CountdownItem
+        base.OnSourceInitialized(e);
+        FitToWorkArea();
+        SystemParameters.StaticPropertyChanged += OnSystemParametersChanged;
+    }
+
+    protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
+    {
+        base.OnDpiChanged(oldDpi, newDpi);
+        FitToWorkArea();
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        SystemParameters.StaticPropertyChanged -= OnSystemParametersChanged;
+        base.OnClosed(e);
+    }
+
+    private void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        // The title already has focus (FocusManager.FocusedElement). Editing usually means
+        // rewording, so start with the whole title selected.
+        if (_viewModel.IsEditing)
         {
-            TargetAt = DateTimeOffset.Now.AddDays(1),
-            ReminderMinutesBefore = _settings.DefaultReminderMinutesBefore,
-            TimeZoneId = _settings.DefaultTimeZoneId
-        };
+            TitleTextBox.SelectAll();
+        }
 
-        Title = item is null ? _localization["Window.Editor.NewTitle"] : _localization["Window.Editor.EditTitle"];
-        HeadingText.Text = _localization[item is null ? "Editor.HeadingNew" : "Editor.HeadingEdit"];
-        SaveButton.Content = _localization[item is null ? "Common.Inscribe" : "Common.Amend"];
-        TitleTextBox.Text = effectiveItem.Title;
-        SubtitleTextBox.Text = effectiveItem.Subtitle;
-        TagsTextBox.Text = string.Join(", ", effectiveItem.Tags);
-        PinnedCheckBox.IsChecked = effectiveItem.IsPinned;
-
-        var zone = OptionCatalog.ResolveTimeZone(effectiveItem.TimeZoneId);
-        var zonedTarget = TimeZoneInfo.ConvertTime(effectiveItem.TargetAt, zone);
-        TargetDatePicker.SelectedDate = zonedTarget.Date;
-        HourComboBox.SelectedItem = zonedTarget.Hour;
-        MinuteComboBox.SelectedItem = zonedTarget.Minute;
-        ReminderComboBox.SelectedItem = ReminderComboBox.Items
-            .OfType<ReminderOption>()
-            .FirstOrDefault(option => option.Minutes == effectiveItem.ReminderMinutesBefore)
-            ?? OptionCatalog.GetReminderOptions().First();
-
-        TimeZoneComboBox.SelectedItem = TimeZoneComboBox.Items
-            .OfType<TimeZoneOption>()
-            .FirstOrDefault(option => option.Id == zone.Id)
-            ?? TimeZoneComboBox.Items.OfType<TimeZoneOption>().FirstOrDefault();
+        WatchDateTextOverflow();
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)
     {
-        if (string.IsNullOrWhiteSpace(TitleTextBox.Text))
+        Save();
+    }
+
+    private void DueDatePicker_OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        _typedDateRejected = false;
+    }
+
+    // The picker could not read the typed text (a missing or impossible day, stray words). It
+    // would put the previous date back without a word, and Enter or a click on Save would then
+    // keep a date the user never chose; the view model clears the date and shows why instead.
+    // This also runs when focus leaves the picker, so a mouse click on Save is covered too.
+    private void DueDatePicker_OnDateValidationError(object? sender, DatePickerDateValidationErrorEventArgs e)
+    {
+        _typedDateRejected = true;
+        _viewModel.RejectTypedDate();
+        Announce(DateErrorText);
+    }
+
+    private void DueDatePicker_OnKeyDown(object sender, KeyEventArgs e)
+    {
+        // Only Enter typed in the date text itself: Enter in the open calendar picks a day. When
+        // that Enter made the picker reject the text, stay in the field with the message showing.
+        if (e.Key == Key.Enter && e.OriginalSource is DatePickerTextBox && Keyboard.Modifiers == ModifierKeys.None && !_typedDateRejected)
         {
-            System.Windows.MessageBox.Show(this, _localization["Validation.MissingTitle.Body"], _localization["Validation.MissingTitle.Title"], MessageBoxButton.OK, MessageBoxImage.Warning);
+            Save();
+        }
+    }
+
+    // The date is written in the user's regional long format. The full-width field holds it in
+    // nearly every culture, but not all (Makonde's month names run past it), nor a custom format
+    // from the Region settings, and a text box without focus would then hide the end of the date
+    // without a sign. Offer the whole date as a tooltip whenever it does not fit, and only then,
+    // so the tooltip never repeats a date that is already in plain view.
+    private void WatchDateTextOverflow()
+    {
+        DueDatePicker.ApplyTemplate();
+        _dateTextBox = DueDatePicker.Template?.FindName("PART_TextBox", DueDatePicker) as DatePickerTextBox;
+        if (_dateTextBox is null)
+        {
             return;
         }
 
-        if (TargetDatePicker.SelectedDate is null)
+        // A new text changes the tooltip's content at once; the width it takes up is only known
+        // after the next layout pass, which reports it through ScrollChanged.
+        _dateTextBox.TextChanged += (_, _) => UpdateDateToolTip();
+        _dateTextBox.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler((_, _) => UpdateDateToolTip()));
+        UpdateDateToolTip();
+    }
+
+    private void UpdateDateToolTip()
+    {
+        if (_dateTextBox is { } box)
         {
-            System.Windows.MessageBox.Show(this, _localization["Validation.MissingDate.Body"], _localization["Validation.MissingDate.Title"], MessageBoxButton.OK, MessageBoxImage.Warning);
+            box.ToolTip = box.Text.Length > 0 && box.ExtentWidth > box.ViewportWidth ? box.Text : null;
+        }
+    }
+
+    private void Save()
+    {
+        var invalidField = _viewModel.Validate();
+        if (invalidField == EditorField.None)
+        {
+            Result = _viewModel.CreateResult();
+            DialogResult = true;
             return;
         }
 
-        if (HourComboBox.SelectedItem is not int hour || MinuteComboBox.SelectedItem is not int minute)
+        var (input, message) = invalidField switch
         {
-            System.Windows.MessageBox.Show(this, _localization["Validation.MissingTime.Body"], _localization["Validation.MissingTime.Title"], MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
+            EditorField.Date => ((Control)DueDatePicker, DateErrorText),
+            EditorField.Time => (HourComboBox, TimeErrorText),
+            EditorField.TimeZone => (TimeZoneComboBox, TimeZoneErrorText),
+            EditorField.Reminder => (ReminderComboBox, ReminderErrorText),
+            _ => (TitleTextBox, TitleErrorText)
+        };
 
-        if (TimeZoneComboBox.SelectedItem is not TimeZoneOption zoneOption)
+        input.Focus();
+        input.BringIntoView();
+        Announce(message);
+    }
+
+    // The note appears while the user is working in another field (a repeated fall-back time),
+    // and the counters are only visual; announce each once when it appears, and
+    // a counter again when its field is full and further typing is cut off, so screen-reader
+    // users learn about them too.
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
         {
-            System.Windows.MessageBox.Show(this, _localization["Validation.MissingTimeZone.Body"], _localization["Validation.MissingTimeZone.Title"], MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
+            case nameof(EditCountdownViewModel.ScheduleNote):
+                Announce(ScheduleNoteText);
+                break;
+            case nameof(EditCountdownViewModel.TitleCounterStage) when _viewModel.TitleCounterStage != CounterStage.Hidden:
+                Announce(TitleCounterText);
+                break;
+            case nameof(EditCountdownViewModel.NoteCounterStage) when _viewModel.NoteCounterStage != CounterStage.Hidden:
+                Announce(NoteCounterText);
+                break;
         }
+    }
 
-        if (ReminderComboBox.SelectedItem is not ReminderOption reminder)
-        {
-            System.Windows.MessageBox.Show(this, _localization["Validation.MissingReminder.Body"], _localization["Validation.MissingReminder.Title"], MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-
-        var zone = OptionCatalog.ResolveTimeZone(zoneOption.Id);
-        var selectedDate = TargetDatePicker.SelectedDate.Value;
-        var localTime = new DateTime(
-            selectedDate.Year,
-            selectedDate.Month,
-            selectedDate.Day,
-            hour,
-            minute,
-            0,
-            DateTimeKind.Unspecified);
-
-        if (zone.IsInvalidTime(localTime))
-        {
-            System.Windows.MessageBox.Show(
-                this,
-                _localization["Validation.InvalidTime.Body"],
-                _localization["Validation.InvalidTime.Title"],
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
-            return;
-        }
-
-        var target = new DateTimeOffset(localTime, zone.GetUtcOffset(localTime));
-        var model = _existingItem is null
-            ? new CountdownItem
+    // WPF does not announce live regions by itself. Raise the event once the text has been laid
+    // out, so it is read after any focus change that caused it.
+    private void Announce(TextBlock region)
+    {
+        Dispatcher.InvokeAsync(
+            () =>
             {
-                CreatedAt = DateTimeOffset.Now
+                if (region.Text.Length > 0 && AutomationPeer.ListenerExists(AutomationEvents.LiveRegionChanged))
+                {
+                    UIElementAutomationPeer.CreatePeerForElement(region)?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+                }
+            },
+            DispatcherPriority.Background);
+    }
+
+    // A TextBox that does not accept returns (none of the three fields does, even though they
+    // wrap) keeps only the first line of a paste, and nothing at all when the clipboard starts
+    // with a line break. Turn line breaks, tabs and other control characters into spaces instead so a
+    // multi-line paste arrives whole; the save path collapses the remaining runs of whitespace.
+    // Drag-and-drop goes through the same event.
+    private void TextField_OnPasting(object sender, DataObjectPastingEventArgs e)
+    {
+        string? text;
+        try
+        {
+            text = e.DataObject.GetData(DataFormats.UnicodeText, autoConvert: true) as string;
+        }
+        catch (COMException)
+        {
+            // The clipboard owner failed to render the data; let the default paste handle it.
+            return;
+        }
+
+        if (string.IsNullOrEmpty(text) || !text.Any(IsLineBreakOrControl))
+        {
+            return;
+        }
+
+        var flattened = new DataObject();
+        flattened.SetData(DataFormats.UnicodeText, FlattenToOneLine(text));
+        e.DataObject = flattened;
+        e.FormatToApply = DataFormats.UnicodeText;
+    }
+
+    private static string FlattenToOneLine(string text)
+    {
+        var builder = new StringBuilder(text.Length);
+        var pendingSpace = false;
+        foreach (var ch in text)
+        {
+            if (IsLineBreakOrControl(ch))
+            {
+                pendingSpace = true;
+                continue;
             }
-            : new CountdownItem
+
+            if (pendingSpace)
             {
-                Id = _existingItem.Id,
-                CreatedAt = _existingItem.CreatedAt
-            };
-
-        model.Title = TitleTextBox.Text.Trim();
-        model.Subtitle = SubtitleTextBox.Text.Trim();
-        model.TargetAt = target;
-        model.TimeZoneId = zone.Id;
-        model.IsPinned = PinnedCheckBox.IsChecked == true;
-        model.ReminderMinutesBefore = reminder.Minutes;
-        model.ReminderShown = false;
-        model.DueShown = false;
-        model.Tags = TagsTextBox.Text
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        Result = model;
-        DialogResult = true;
-    }
-
-    private void Cancel_Click(object sender, RoutedEventArgs e)
-    {
-        DialogResult = false;
-    }
-
-    private void WindowSurface_OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (e.ChangedButton != MouseButton.Left)
-        {
-            return;
-        }
-
-        if (e.OriginalSource is System.Windows.DependencyObject dep && IsInteractiveSource(dep))
-        {
-            return;
-        }
-
-        DragMove();
-    }
-
-    private static bool IsInteractiveSource(System.Windows.DependencyObject? source)
-    {
-        while (source is not null)
-        {
-            if (source is System.Windows.Controls.Primitives.ButtonBase or
-                System.Windows.Controls.Primitives.TextBoxBase or
-                System.Windows.Controls.ComboBox or
-                System.Windows.Controls.DatePicker or
-                System.Windows.Controls.Slider or
-                System.Windows.Controls.Primitives.Thumb)
-            {
-                return true;
+                builder.Append(' ');
+                pendingSpace = false;
             }
 
-            source = System.Windows.Media.VisualTreeHelper.GetParent(source);
+            builder.Append(ch);
         }
 
-        return false;
+        // A trailing break still separates the paste from any text after the caret.
+        if (pendingSpace)
+        {
+            builder.Append(' ');
+        }
+
+        return builder.ToString();
+    }
+
+    private static bool IsLineBreakOrControl(char ch) => char.IsControl(ch) || ch is '\u2028' or '\u2029';
+
+    private void Sheet_OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        WindowDrag.TryDragMove(this, e);
+    }
+
+    private void OnSystemParametersChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(SystemParameters.WorkArea))
+        {
+            Dispatcher.InvokeAsync(FitToWorkArea);
+        }
+    }
+
+    // The dialog is never taller than the work area of its monitor; past that the form scrolls.
+    // (WPF already keeps a CenterOwner dialog inside the work area when it first appears.)
+    private void FitToWorkArea()
+    {
+        MaxHeight = GetWorkArea().Height;
+        KeepBottomInWorkArea();
+    }
+
+    private void OnSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (e.HeightChanged && IsLoaded)
+        {
+            KeepBottomInWorkArea();
+        }
+    }
+
+    // SizeToContent grows the dialog downwards when validation messages or notes appear; lift it
+    // so the actions never slide below the taskbar.
+    private void KeepBottomInWorkArea()
+    {
+        var workArea = GetWorkArea();
+        if (Top + ActualHeight > workArea.Bottom)
+        {
+            Top = Math.Max(workArea.Top, workArea.Bottom - ActualHeight);
+        }
+    }
+
+    // Work area of the monitor the dialog is on, in device-independent units. Falls back to the
+    // primary monitor's before the window has a handle.
+    private Rect GetWorkArea()
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero || PresentationSource.FromVisual(this)?.CompositionTarget is not { } target)
+        {
+            return SystemParameters.WorkArea;
+        }
+
+        var pixels = Screen.FromHandle(handle).WorkingArea;
+        var toDips = target.TransformFromDevice;
+        return new Rect(
+            toDips.Transform(new Point(pixels.Left, pixels.Top)),
+            toDips.Transform(new Point(pixels.Right, pixels.Bottom)));
     }
 }
