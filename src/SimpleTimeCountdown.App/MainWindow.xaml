@@ -257,12 +257,8 @@
                         </Separator>
                     </StackPanel>
 
-                    <TextBlock Margin="0,12,0,0"
-                               Style="{StaticResource Text.Emphasis}"
-                               TextAlignment="Center"
-                               Text="{Binding [Main.Subtitle], Source={StaticResource Loc}}" />
                     <!-- Localized time-zone names run long, so the clock wraps rather than shrinking. -->
-                    <TextBlock Margin="0,4,0,0"
+                    <TextBlock Margin="0,12,0,0"
                                Style="{StaticResource Text.Caption}"
                                TextAlignment="Center"
                                Text="{Binding CurrentTimeDisplay}" />

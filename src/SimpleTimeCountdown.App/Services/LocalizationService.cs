@@ -142,7 +142,6 @@ public sealed class LocalizationService : INotifyPropertyChanged
             ["Language.Chinese"] = "中文",
 
             // ===== Main panel =====
-            ["Main.Subtitle"] = "A REGISTER OF MATTERS PENDING & DUE",
             ["Main.Clock"] = "{0} · {1}",
             ["Format.Clock"] = "ddd d MMM, HH:mm:ss",
             ["Main.Search.Label"] = "Search countdowns",
@@ -329,7 +328,6 @@ public sealed class LocalizationService : INotifyPropertyChanged
             ["Language.Chinese"] = "中文",
 
             // ===== Main panel =====
-            ["Main.Subtitle"] = "待办与到期事项名录",
             ["Main.Clock"] = "{0} · {1}",
             ["Format.Clock"] = "M月d日 dddd HH:mm:ss",
             ["Main.Search.Label"] = "搜索倒计时",
