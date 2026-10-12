@@ -104,6 +104,63 @@ public sealed class EditCountdownViewModelTests
         });
     }
 
+    [Fact]
+    public void AFormHasChangesOnlyWhileItDiffersFromWhatItFirstShowed()
+    {
+        Sta.Run(() =>
+        {
+            var form = NewForm();
+            Assert.False(form.HasChanges);
+
+            form.Title = "Dentist";
+            Assert.True(form.HasChanges);
+
+            form.Title = string.Empty;
+            Assert.False(form.HasChanges);
+
+            form.IsPinned = true;
+            Assert.True(form.HasChanges);
+        });
+    }
+
+    [Fact]
+    public void ANewlyChosenTimeThatHasPassedIsPointedOut()
+    {
+        Sta.Run(() =>
+        {
+            var form = NewForm();
+            var pastDue = LocalizationService.Instance["Editor.PastDue"];
+            Assert.DoesNotContain(pastDue, form.ScheduleNote);
+
+            form.Date = DateTime.Today.AddDays(-2);
+            Assert.Contains(pastDue, form.ScheduleNote);
+
+            form.Date = DateTime.Today.AddDays(2);
+            Assert.DoesNotContain(pastDue, form.ScheduleNote);
+        });
+    }
+
+    [Fact]
+    public void AnOverdueCountdownIsNotFlaggedAgainWhenItsScheduleIsLeftAlone()
+    {
+        Sta.Run(() =>
+        {
+            LocalizationService.Instance.SetLanguage(LocalizationService.English);
+            var overdue = new CountdownItem
+            {
+                Title = "Library books",
+                TargetAt = DateTimeOffset.Now.AddDays(-3),
+                CreatedAt = DateTimeOffset.Now.AddDays(-20),
+                TimeZoneId = TimeZoneInfo.Local.Id
+            };
+
+            var form = new EditCountdownViewModel(overdue, 60, TimeZoneInfo.Local.Id);
+            form.Title = "Return library books";
+
+            Assert.DoesNotContain(LocalizationService.Instance["Editor.PastDue"], form.ScheduleNote);
+        });
+    }
+
     private static EditCountdownViewModel NewForm()
     {
         LocalizationService.Instance.SetLanguage(LocalizationService.English);

@@ -8,6 +8,12 @@ public sealed class AppSettings
 
     public bool DesktopLayerEnabled { get; set; }
 
+    /// <summary>
+    /// Whether reminders name the countdown. Off, they only say that one needs attention, which
+    /// keeps titles off the lock screen and out of shared screens.
+    /// </summary>
+    public bool ShowTitlesInNotifications { get; set; } = true;
+
     public double PanelOpacity { get; set; } = 0.96;
 
     public bool ShowArchivedOnly { get; set; }

@@ -318,7 +318,39 @@
                             Click="ResetPlacement_Click"
                             Content="{Binding [Settings.ResetPlacement], Source={StaticResource Loc}}" />
 
-                    <!-- V · About -->
+                    <!-- V · Privacy & data: what the app keeps and where, in plain words, and the
+                         user's say over it. Everything is local; the links open the actual folders. -->
+                    <TextBlock Style="{StaticResource Text.SectionHeading}"
+                               Margin="0,32,0,0"
+                               AutomationProperties.HeadingLevel="Level2"
+                               Text="{Binding [Settings.Section.Privacy], Source={StaticResource Loc}}" />
+                    <Separator Style="{StaticResource Ornament.DiamondRule}" />
+                    <TextBlock Style="{StaticResource Text.Caption}"
+                               Margin="0,16,0,0"
+                               Text="{Binding [Settings.Privacy.Statement], Source={StaticResource Loc}}" />
+                    <CheckBox Style="{StaticResource CheckBox.Field}"
+                              Margin="0,16,0,0"
+                              Content="{Binding [Settings.Privacy.NotificationTitles], Source={StaticResource Loc}}"
+                              AutomationProperties.HelpText="{Binding [Settings.Privacy.NotificationTitlesHint], Source={StaticResource Loc}}"
+                              IsChecked="{Binding ShowTitlesInNotifications}" />
+                    <!-- Indented by the check box's 16 DIP box and 8 DIP gap so it lines up with the label. -->
+                    <TextBlock Style="{StaticResource Text.Caption}"
+                               Margin="24,4,0,0"
+                               Text="{Binding [Settings.Privacy.NotificationTitlesHint], Source={StaticResource Loc}}" />
+                    <WrapPanel Margin="-6,12,0,0">
+                        <Button Style="{StaticResource Button.Link}"
+                                Margin="0,0,12,0"
+                                Click="OpenDataFolder_Click"
+                                Content="{Binding [Settings.Privacy.OpenData], Source={StaticResource Loc}}" />
+                        <Button Style="{StaticResource Button.Link}"
+                                Click="OpenLogs_Click"
+                                Content="{Binding [Settings.Privacy.OpenLogs], Source={StaticResource Loc}}" />
+                    </WrapPanel>
+                    <TextBlock Style="{StaticResource Text.Caption}"
+                               Margin="0,4,0,0"
+                               Text="{Binding [Settings.Privacy.LogsHint], Source={StaticResource Loc}}" />
+
+                    <!-- VI · About -->
                     <TextBlock Style="{StaticResource Text.SectionHeading}"
                                Margin="0,32,0,0"
                                AutomationProperties.HeadingLevel="Level2"
@@ -334,18 +366,18 @@
                                Margin="0,4,0,0"
                                Text="{Binding [Settings.About.License], Source={StaticResource Loc}}" />
                     <WrapPanel Margin="-6,4,0,0">
+                        <Button Style="{StaticResource Button.Link}"
+                                Margin="0,0,12,0"
+                                Click="UserGuide_Click"
+                                Content="{Binding [Settings.About.UserGuide], Source={StaticResource Loc}}" />
                         <Button x:Name="LegalNoticesButton"
                                 Style="{StaticResource Button.Link}"
                                 Margin="0,0,12,0"
                                 Click="LegalNotices_Click"
                                 Content="{Binding [Settings.About.Notices], Source={StaticResource Loc}}" />
                         <Button Style="{StaticResource Button.Link}"
-                                Margin="0,0,12,0"
                                 Click="ReportProblem_Click"
                                 Content="{Binding [Settings.About.ReportProblem], Source={StaticResource Loc}}" />
-                        <Button Style="{StaticResource Button.Link}"
-                                Click="OpenLogs_Click"
-                                Content="{Binding [Settings.About.OpenLogs], Source={StaticResource Loc}}" />
                     </WrapPanel>
                 </StackPanel>
             </ScrollViewer>

@@ -68,6 +68,9 @@ public sealed class EditCountdownViewModel : ObservableObject, INotifyDataErrorI
     private readonly DateTime _loadedLocalTime;
     private readonly string _loadedZoneId;
 
+    // Every field as the form first showed it, to tell whether closing it would lose any input.
+    private readonly FormValues _initialValues;
+
     private string _title;
     private string _note;
     private DateTime? _date;
@@ -119,6 +122,7 @@ public sealed class EditCountdownViewModel : ObservableObject, INotifyDataErrorI
         _titleCounterStage = GetCounterStage(SavedLength(_title), _title.Length, TextInput.MaxTitleLength);
         _noteCounterStage = GetCounterStage(SavedLength(_note), _note.Length, TextInput.MaxNoteLength);
         UpdateScheduleNote();
+        _initialValues = CurrentValues();
     }
 
     public event EventHandler<DataErrorsChangedEventArgs>? ErrorsChanged;
@@ -247,8 +251,9 @@ public sealed class EditCountdownViewModel : ObservableObject, INotifyDataErrorI
     public string TitleHelp => JoinSentences(_titleError, TitleCounterSpoken);
 
     /// <summary>
-    /// Explains which occurrence is saved when the chosen time happens twice because the clocks
-    /// go back; empty for every other time. Notifies only when the text changes.
+    /// Advice on the chosen time: which occurrence is saved when it happens twice because the
+    /// clocks go back, and that a newly chosen time has already passed. Empty otherwise. Notifies
+    /// only when the text changes.
     /// </summary>
     public string ScheduleNote
     {
@@ -295,6 +300,9 @@ public sealed class EditCountdownViewModel : ObservableObject, INotifyDataErrorI
     public bool HasErrors =>
         _titleError.Length > 0 || _dateError.Length > 0 || _timeError.Length > 0 ||
         _timeZoneError.Length > 0 || _reminderError.Length > 0;
+
+    /// <summary>True when any field differs from what the form first showed, so closing it would lose input.</summary>
+    public bool HasChanges => CurrentValues() != _initialValues;
 
     /// <summary>
     /// The chosen date and time as a zone-local wall-clock time, or null while the date is
@@ -430,16 +438,30 @@ public sealed class EditCountdownViewModel : ObservableObject, INotifyDataErrorI
     private void UpdateScheduleNote()
     {
         var zone = _timeZone is null ? null : OptionCatalog.ResolveTimeZone(_timeZone.Id);
-        if (SelectedLocalTime is not { } local || zone is null || !zone.IsAmbiguousTime(local))
+        if (SelectedLocalTime is not { } local || zone is null)
         {
             ScheduleNote = string.Empty;
             return;
         }
 
-        ScheduleNote = IsScheduleUnchanged
-            ? _loc.Format("Editor.AmbiguousTime.Kept", FormatOffset(TimeZoneInfo.ConvertTime(_existing!.TargetAt, zone).Offset))
-            : _loc.Format("Editor.AmbiguousTime.First", FormatOffset(ResolveLocalTime(local, zone)!.Value.Offset));
+        var repeatedTime = !zone.IsAmbiguousTime(local)
+            ? string.Empty
+            : IsScheduleUnchanged
+                ? _loc.Format("Editor.AmbiguousTime.Kept", FormatOffset(TimeZoneInfo.ConvertTime(_existing!.TargetAt, zone).Offset))
+                : _loc.Format("Editor.AmbiguousTime.First", FormatOffset(ResolveLocalTime(local, zone)!.Value.Offset));
+
+        // A deadline that has passed is allowed (the card then counts the time since), but it is
+        // rarely meant, so a newly chosen one is pointed out before saving. An overdue countdown
+        // whose schedule is left alone is not flagged again on every edit.
+        var alreadyPassed = !IsScheduleUnchanged && ResolveLocalTime(local, zone) is { } due && due <= DateTimeOffset.Now
+            ? _loc["Editor.PastDue"]
+            : string.Empty;
+
+        ScheduleNote = JoinSentences(repeatedTime, alreadyPassed);
     }
+
+    private FormValues CurrentValues() =>
+        new(_title, _note, _date, _hour, _minute, _timeZone?.Id, _reminder?.Minutes, _isPinned);
 
     private void Revalidate()
     {
@@ -520,6 +542,16 @@ public sealed class EditCountdownViewModel : ObservableObject, INotifyDataErrorI
         var sign = offset >= TimeSpan.Zero ? "+" : "-";
         return FormattableString.Invariant($"UTC{sign}{offset.Duration():hh\\:mm}");
     }
+
+    private readonly record struct FormValues(
+        string Title,
+        string Note,
+        DateTime? Date,
+        int? Hour,
+        int? Minute,
+        string? TimeZoneId,
+        int? ReminderMinutes,
+        bool IsPinned);
 
     private static DateTime ToZoneTime(DateTimeOffset instant, TimeZoneInfo zone)
     {
