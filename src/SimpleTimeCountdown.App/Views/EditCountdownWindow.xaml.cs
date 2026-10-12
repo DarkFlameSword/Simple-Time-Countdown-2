@@ -10,6 +10,7 @@ using System.Windows.Interop;
 using System.Windows.Threading;
 using TimeCountdown.Controls;
 using TimeCountdown.Models;
+using TimeCountdown.Services;
 using Control = System.Windows.Controls.Control;
 using DataFormats = System.Windows.DataFormats;
 using DataObject = System.Windows.DataObject;
@@ -68,6 +69,38 @@ public partial class EditCountdownWindow : Window
     {
         base.OnDpiChanged(oldDpi, newDpi);
         FitToWorkArea();
+    }
+
+    /// <summary>
+    /// Esc, Cancel and Alt+F4 would throw away whatever was typed, so with unsaved input the user is
+    /// asked first; the question defaults to keeping it. Not while the app itself is exiting (sign-out,
+    /// Setup's request to close), which must not wait on a question.
+    /// </summary>
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        base.OnClosing(e);
+        if (e.Cancel || DialogResult == true || !_viewModel.HasChanges ||
+            System.Windows.Application.Current is App { CanWindowClose: true })
+        {
+            return;
+        }
+
+        var localization = LocalizationService.Instance;
+        var answer = System.Windows.MessageBox.Show(
+            this,
+            localization[_viewModel.IsEditing ? "Message.DiscardEdit" : "Message.DiscardNew"],
+            localization["Message.DiscardTitle"],
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+        if (answer != MessageBoxResult.Yes)
+        {
+            e.Cancel = true;
+
+            // Esc and Cancel close the dialog by setting DialogResult to false; clearing it lets
+            // them do so again.
+            DialogResult = null;
+        }
     }
 
     protected override void OnClosed(EventArgs e)
@@ -172,8 +205,8 @@ public partial class EditCountdownWindow : Window
         Announce(message);
     }
 
-    // The note appears while the user is working in another field (a repeated fall-back time),
-    // and the counters are only visual; announce each once when it appears, and
+    // The note appears while the user is working in another field (a repeated fall-back time, a
+    // time that has passed), and the counters are only visual; announce each once when it appears, and
     // a counter again when its field is full and further typing is cut off, so screen-reader
     // users learn about them too.
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)

@@ -36,9 +36,11 @@ Select **+** in the panel's top bar (or press `Ctrl+N`), then fill in:
 
 - **Title** (required, up to 120 characters). It is always shown in full on the card; long titles simply use a slightly smaller size.
 - **Note** (optional, up to 280 characters), for example a room number or what to bring.
-- **Due date**, **hour** and **minute**, in any **time zone**. If a time does not exist or happens twice because of a daylight-saving change, the form tells you.
+- **Due date**, **hour** and **minute**, in any **time zone**. If a time does not exist or happens twice because of a daylight-saving change, or has already passed, the form tells you.
 - **Reminder**: none, or 15 minutes, 1 hour, 1 day or 3 days before.
 - **Pin** it to keep it at the top of the list.
+
+If you close the form with `Esc` or **Cancel** after typing something, it asks before discarding it.
 
 ![New countdown](docs/images/example-add.png)
 
@@ -52,6 +54,8 @@ Select **+** in the panel's top bar (or press `Ctrl+N`), then fill in:
 ### Archive, restore and search
 
 - Archive a countdown you are done with; it gets a postmark stamp. Switch between the active list and the archive with the archive button in the top bar (or `Ctrl+E`), and restore an archived countdown at any time.
+- After you archive, restore or delete a countdown, the bottom of the panel offers **Undo** (or press `Ctrl+Z`). The offer stays while the pointer or keyboard focus is on it, and lapses about 10 seconds after they move away.
+- Deleting asks first, and the question defaults to **No**. To keep a countdown without seeing it in the list, archive it instead.
 - Select the magnifier (or press `Ctrl+F`) to search titles and notes. `Esc` clears the search, and a second `Esc` closes it.
 
 ![Archive](docs/images/example-archive.png)
@@ -59,6 +63,8 @@ Select **+** in the panel's top bar (or press `Ctrl+N`), then fill in:
 ### Reminders
 
 You get a Windows notification when a reminder is due and when a deadline is reached. Selecting the notification opens the panel. Reminders that fall due while your PC is off or the app is closed are shown the next time the app starts, grouped together. Notifications follow your Windows notification settings (Focus / Do not disturb included).
+
+To keep countdown titles off the lock screen and out of shared screens, turn off **Settings > Privacy & data > Show countdown titles in notifications**. Notifications then only say how soon a countdown is due.
 
 ### Keyboard shortcuts
 
@@ -68,7 +74,9 @@ You get a Windows notification when a reminder is due and when a deadline is rea
 | `Ctrl+F` | Search |
 | `Esc` | Clear the search, then close it |
 | `Ctrl+E` | Show or hide the archive |
+| `Ctrl+Z` | Undo the last archive, restore or delete |
 | `Ctrl+,` | Settings |
+| `F1` | Open this user guide |
 
 ### The panel and the tray icon
 
@@ -84,7 +92,8 @@ Open Settings with the gear button in the top bar (or `Ctrl+,`). Changes apply i
 - **Behaviour and defaults**: language (English / 中文), launch when you sign in to Windows, keep running in the tray when the panel is closed, and the reminder and time zone new countdowns start with.
 - **Status thresholds**: how close a deadline must be for a countdown to count as Perilous or Urgent.
 - **Window position**: put the panel back in its default place.
-- **About**: the version, a link to report a problem, and a button that opens the log folder.
+- **Privacy & data**: what the app keeps and where, whether notifications show countdown titles, and buttons that open the data folder and the log folder.
+- **About**: the version, the user guide, the licence notices and a link to report a problem.
 
 ![Settings](docs/images/example-setting.png)
 
@@ -98,10 +107,14 @@ Open Settings with the gear button in the top bar (or `Ctrl+,`). Changes apply i
 
 ## Your data and privacy
 
-- Your countdowns and settings are saved on your PC in `%AppData%\TimeCountdown\state.json`. The app keeps the previous good copy as `state.json.bak`.
+- The app needs no account, makes no network connections and collects no usage data. The user guide and **Report a problem** open in your browser only when you choose them.
+- Your countdowns and settings are saved on your PC in `%AppData%\TimeCountdown\state.json`. The app keeps the previous good copy as `state.json.bak`. **Settings > Privacy & data > Open the data folder** takes you there, for example to back the file up or copy it to another PC.
 - If the file ever becomes unreadable, the app restores the last good copy, keeps the unreadable file as `state.corrupt.<date and time>.json` so nothing is lost, and tells you where it is.
-- Diagnostic logs (to help with problem reports) go to `%LocalAppData%\TimeCountdown\logs`; only the last 7 days are kept. **Settings > About > Open the log folder** takes you there.
-- The MSIX version keeps both folders in its own private storage under `%LocalAppData%\Packages\SimpleTimeCountdown.Desktop_<id>\`.
+- Diagnostic logs (to help with problem reports) go to `%LocalAppData%\TimeCountdown\logs`; only the last 7 days are kept. **Settings > Privacy & data > Open the log folder** takes you there. Logs record technical problems, not your countdowns, and your Windows user folder is written as `%USERPROFILE%`, so a log can be attached to a public problem report.
+- The app asks Windows for nothing beyond what it needs: it runs with your normal user rights (never as administrator), starts at sign-in only if you turn that on, and its notifications follow your Windows notification settings.
+- The MSIX version keeps both folders in its own private storage under `%LocalAppData%\Packages\SimpleTimeCountdown.Desktop_<id>\`; the Settings buttons open them there.
+
+How the app follows usability, accessibility and privacy guidelines (Nielsen's heuristics, ISO 9241, ISO/IEC 29100) is described in [docs/usability-privacy-review.md](docs/usability-privacy-review.md).
 
 ## Uninstall
 
@@ -114,7 +127,7 @@ Open Settings with the gear button in the top bar (or `Ctrl+,`). Changes apply i
 - **The panel is gone.** Click the tray icon. If the panel is off-screen (for example after unplugging a monitor), open Settings and choose **Reset panel position**.
 - **The panel disappears when I press Win+D.** With "Keep the panel behind other windows" on, *Show desktop* hides it too. Click the tray icon to bring it back.
 - **I get no reminders.** Check that the countdown has a reminder, that the app is still running in the tray, and that Windows notifications (and Focus / Do not disturb) allow them.
-- **Something went wrong.** Use **Settings > About > Report a problem**, and attach the latest log file from **Open the log folder**.
+- **Something went wrong.** Use **Settings > About > Report a problem**, and attach the latest log file from **Settings > Privacy & data > Open the log folder**.
 
 ---
 
@@ -176,6 +189,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\Test-SetupExe.ps1
 
 - `.github/workflows/` — CI: build, tests, the three packages and a Setup.exe install/uninstall test
 - `docs/images/` — README screenshots
+- `docs/usability-privacy-review.md` — how the app maps to Nielsen's heuristics, ISO 9241 and privacy principles (also in Chinese)
 - `packaging/msix/` — MSIX manifest template and logos
 - `scripts/` — release scripts (portable zip, Setup.exe, MSIX, signing), the Setup.exe smoke test and icon generation
 - `src/Shared/` — names the app and the installer must agree on

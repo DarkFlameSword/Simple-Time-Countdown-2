@@ -61,6 +61,25 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     [Fact]
+    public void WithTitlesHiddenANotificationSaysOnlyHowSoon()
+    {
+        Sta.Run(() =>
+        {
+            using var viewModel = CreateViewModel(Item("Clinic appointment", DateTimeOffset.Now.AddMinutes(30), reminderMinutes: 60));
+            viewModel.ShowTitlesInNotifications = false;
+            var raised = new List<CountdownNotificationEventArgs>();
+            viewModel.NotificationRequested += (_, e) => raised.Add(e);
+
+            viewModel.Start();
+
+            var notification = Assert.Single(raised);
+            Assert.DoesNotContain("Clinic", notification.Title);
+            Assert.DoesNotContain("Clinic", notification.Message);
+            Assert.False(viewModel.Settings.ShowTitlesInNotifications);
+        });
+    }
+
+    [Fact]
     public void EditingOnlyTheWordingDoesNotReplayAlertsAlreadyShown()
     {
         Sta.Run(() =>
@@ -197,6 +216,90 @@ public sealed class MainWindowViewModelTests : IDisposable
             {
                 File.Delete(_stateDirectory);
             }
+        });
+    }
+
+    [Fact]
+    public void UndoingAnArchiveBringsTheCountdownBackWithItsReminderStillPending()
+    {
+        Sta.Run(() =>
+        {
+            var item = Item("Thesis", DateTimeOffset.Now.AddDays(5), reminderMinutes: 60);
+            using var viewModel = CreateViewModel(item);
+            var card = viewModel.Countdowns.Single();
+
+            viewModel.ArchiveCountdown(card);
+            Assert.True(viewModel.CanUndo);
+            Assert.Contains("Thesis", viewModel.UndoText);
+
+            Assert.Same(card, viewModel.Undo());
+            Assert.False(card.IsArchived);
+            Assert.Null(card.Model.ArchivedAt);
+            Assert.False(card.Model.ReminderShown);
+            Assert.False(viewModel.CanUndo);
+            Assert.Equal(string.Empty, viewModel.UndoText);
+        });
+    }
+
+    [Fact]
+    public void UndoingARestoreFilesTheCountdownAgainUnderItsOriginalDate()
+    {
+        Sta.Run(() =>
+        {
+            var archivedAt = DateTimeOffset.Now.AddDays(-3);
+            var item = Item("Old exam", DateTimeOffset.Now.AddDays(-4));
+            item.IsArchived = true;
+            item.ArchivedAt = archivedAt;
+            using var viewModel = CreateViewModel(item);
+            var card = viewModel.Countdowns.Single();
+
+            viewModel.RestoreCountdown(card);
+            viewModel.Undo();
+
+            Assert.True(card.IsArchived);
+            Assert.Equal(archivedAt, card.Model.ArchivedAt);
+        });
+    }
+
+    [Fact]
+    public void UndoingADeleteBringsBackTheSameCountdown()
+    {
+        Sta.Run(() =>
+        {
+            var item = Item("Visa", DateTimeOffset.Now.AddDays(12));
+            item.Subtitle = "Embassy, 9:00";
+            using var viewModel = CreateViewModel(item);
+
+            viewModel.RemoveCountdown(viewModel.Countdowns.Single());
+            Assert.Empty(viewModel.Countdowns);
+
+            var restored = viewModel.Undo();
+
+            Assert.NotNull(restored);
+            Assert.Equal(item.Id, restored.Id);
+            Assert.Equal("Embassy, 9:00", restored.Subtitle);
+            Assert.Equal(item.CreatedAt, restored.Model.CreatedAt);
+            Assert.Same(restored, viewModel.Countdowns.Single());
+        });
+    }
+
+    [Fact]
+    public void UndoOnlyTakesBackTheLastActionAndLapsesWhenDismissed()
+    {
+        Sta.Run(() =>
+        {
+            using var viewModel = CreateViewModel(Item("A", DateTimeOffset.Now.AddDays(1)), Item("B", DateTimeOffset.Now.AddDays(2)));
+
+            viewModel.ArchiveCountdown(viewModel.Countdowns[0]);
+            viewModel.TogglePin(viewModel.Countdowns[1]);
+            Assert.False(viewModel.CanUndo);
+            Assert.Null(viewModel.Undo());
+
+            viewModel.ArchiveCountdown(viewModel.Countdowns.First(card => !card.IsArchived));
+            viewModel.DismissUndo();
+            Assert.False(viewModel.CanUndo);
+            Assert.Null(viewModel.Undo());
+            Assert.All(viewModel.Countdowns, card => Assert.True(card.IsArchived));
         });
     }
 
