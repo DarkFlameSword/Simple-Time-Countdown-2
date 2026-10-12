@@ -37,7 +37,7 @@ Select **+** in the panel's top bar (or press `Ctrl+N`), then fill in:
 - **Title** (required, up to 120 characters). It is always shown in full on the card; long titles simply use a slightly smaller size.
 - **Note** (optional, up to 280 characters), for example a room number or what to bring.
 - **Due date**, **hour** and **minute**, in any **time zone**. If a time does not exist or happens twice because of a daylight-saving change, the form tells you.
-- **Reminder**: none, or 15 minutes, 1 hour, 1 day or 3 days before.
+- **Reminder**: how long before the deadline, in **days**, **hours** and **minutes** (up to 999 days, 23 hours and 59 minutes). Leave all three at 0 for no reminder.
 - **Pin** it to keep it at the top of the list.
 
 ![New countdown](docs/images/example-add.png)
@@ -47,7 +47,7 @@ Select **+** in the panel's top bar (or press `Ctrl+N`), then fill in:
 - The label at the top shows the status: **Standing**, **Urgent** or **Perilous** as the deadline approaches (you choose when in Settings), then **Overdue** once it has passed.
 - The large figures show the time left (days and hours, then hours and minutes, then minutes and seconds). Past the deadline they count the time since.
 - The burning cigar shows how much of the time since you created the countdown has gone. When the deadline passes, only a heap of ash is left.
-- The buttons under each card pin or unpin it, archive it, edit it or delete it.
+- The buttons under each card pin or unpin it, archive it, edit it or delete it. Archiving a card also unpins it; archived cards can only be restored or deleted.
 
 ### Archive, restore and search
 
@@ -80,7 +80,7 @@ You get a Windows notification when a reminder is due and when a deadline is rea
 
 Open Settings with the gear button in the top bar (or `Ctrl+,`). Changes apply immediately.
 
-- **Display**: keep the panel above other windows, or keep it behind them; panel opacity (85–100%).
+- **Display**: keep the panel above other windows, or keep it behind them; panel opacity (20–100%).
 - **Behaviour and defaults**: language (English / 中文), launch when you sign in to Windows, keep running in the tray when the panel is closed, and the reminder and time zone new countdowns start with.
 - **Status thresholds**: how close a deadline must be for a countdown to count as Perilous or Urgent.
 - **Window position**: put the panel back in its default place.
@@ -94,7 +94,7 @@ Open Settings with the gear button in the top bar (or `Ctrl+,`). Changes apply i
 - Screen readers get a one-sentence summary of each countdown and names for every button; the progress cigar is read as a percentage.
 - Windows contrast themes are followed: the app switches to your system colours and turns off translucency and shadows.
 - The app follows the Windows **Text size** setting (Settings > Accessibility > Text size), and the panel's text grows as you make the panel wider.
-- Colours meet WCAG AA contrast even at the lowest panel opacity.
+- Colours meet WCAG AA contrast at 85% panel opacity or higher. Below that, how readable the panel is depends on your desktop background.
 
 ## Your data and privacy
 

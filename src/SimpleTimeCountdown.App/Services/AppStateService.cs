@@ -395,7 +395,7 @@ public sealed class AppStateService
 
         settings.LanguageCode = LocalizationService.NormalizeLanguageCode(settings.LanguageCode);
         settings.DefaultTimeZoneId = NormalizeTimeZoneId(settings.DefaultTimeZoneId);
-        settings.DefaultReminderMinutesBefore = OptionCatalog.SnapReminderMinutes(settings.DefaultReminderMinutesBefore);
+        settings.DefaultReminderMinutesBefore = ReminderLeadTime.Clamp(settings.DefaultReminderMinutesBefore);
 
         var thresholds = CountdownThresholds.Normalize(settings.TodayThresholdDays, settings.SafeThresholdDays);
         settings.TodayThresholdDays = thresholds.PerilousDays;
@@ -428,7 +428,9 @@ public sealed class AppStateService
         item.Subtitle = NormalizeText(item.Subtitle, TextInput.MaxNoteLength, ref trimmed);
 
         item.TimeZoneId = NormalizeTimeZoneId(item.TimeZoneId);
-        item.ReminderMinutesBefore = OptionCatalog.SnapReminderMinutes(item.ReminderMinutesBefore);
+        item.ReminderMinutesBefore = ReminderLeadTime.Clamp(item.ReminderMinutesBefore);
+        // Only active countdowns can be pinned; older versions kept the pin on archived ones.
+        item.IsPinned &= !item.IsArchived;
         item.TargetAt = item.TargetAt < MinSaneDate ? MinSaneDate : item.TargetAt > MaxSaneDate ? MaxSaneDate : item.TargetAt;
 
         // Both are informational (progress and the archive stamp); default and null already mean

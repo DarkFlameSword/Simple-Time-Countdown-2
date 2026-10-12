@@ -104,7 +104,7 @@ public sealed class AppStateServiceTests : IDisposable
             "{\"Id\":\"00000000-0000-0000-0000-000000000000\",\"Title\":null,\"Subtitle\":null,\"Tags\":null,\"TimeZoneId\":null," +
             "\"TargetAt\":\"0001-01-01T00:00:00+00:00\",\"ReminderMinutesBefore\":2147483647,\"ArchivedAt\":\"9999-01-01T00:00:00+00:00\"}," +
             $"{{\"Id\":\"{duplicate}\",\"Title\":\"Line one\\nline\\ttwo\",\"Tags\":[null,\"a\",\"A\",\"  b  \"],\"ReminderMinutesBefore\":-5}}," +
-            $"{{\"Id\":\"{duplicate}\",\"Title\":\"Dup\",\"ReminderMinutesBefore\":45}}]}}");
+            $"{{\"Id\":\"{duplicate}\",\"Title\":\"Dup\",\"ReminderMinutesBefore\":45,\"IsPinned\":true,\"IsArchived\":true}}]}}");
 
         var state = service.Load();
 
@@ -115,13 +115,16 @@ public sealed class AppStateServiceTests : IDisposable
         Assert.Equal(("", ""), (a.Title, a.Subtitle));
         Assert.Equal(1900, a.TargetAt.Year);
         Assert.Null(a.ArchivedAt);
+        Assert.Equal(ReminderLeadTime.MaxTotalMinutes, a.ReminderMinutesBefore);
         _ = a.TargetAt - TimeSpan.FromMinutes(a.ReminderMinutesBefore);
         Assert.NotEqual(Guid.Empty, a.Id);
         Assert.Equal(duplicate, b.Id);
         Assert.NotEqual(duplicate, c.Id);
         Assert.Equal("Line one line two", b.Title);
         Assert.Equal(0, b.ReminderMinutesBefore);
-        Assert.Equal(60, c.ReminderMinutesBefore);
+        Assert.Equal(45, c.ReminderMinutesBefore);
+        Assert.True(c.IsArchived);
+        Assert.False(c.IsPinned);
     }
 
     [Fact]

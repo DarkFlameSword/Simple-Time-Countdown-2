@@ -35,14 +35,11 @@
             </Style.Triggers>
         </Style>
 
-        <!-- The time-zone and reminder choices are records shown through DisplayMemberPath.
-             Without a name, their automation peers fall back to the record's ToString(), so a
-             screen reader would read "TimeZoneOption { Id = ... }"; name each item by its text. -->
+        <!-- The time-zone choices are records shown through DisplayMemberPath. Without a name,
+             their automation peers fall back to the record's ToString(), so a screen reader would
+             read "TimeZoneOption { Id = ... }"; name each item by its text. -->
         <Style x:Key="Editor.TimeZoneItem" TargetType="ComboBoxItem" BasedOn="{StaticResource ComboBoxItem.Field}">
             <Setter Property="AutomationProperties.Name" Value="{Binding DisplayName}" />
-        </Style>
-        <Style x:Key="Editor.ReminderItem" TargetType="ComboBoxItem" BasedOn="{StaticResource ComboBoxItem.Field}">
-            <Setter Property="AutomationProperties.Name" Value="{Binding Label}" />
         </Style>
         <!-- Hours and minutes are read as they are shown: "05", not "5". -->
         <Style x:Key="Editor.TwoDigitItem" TargetType="ComboBoxItem" BasedOn="{StaticResource ComboBoxItem.Field}">
@@ -234,21 +231,66 @@
                               AutomationProperties.HelpText="{Binding TimeZoneError}" />
                     <TextBlock x:Name="TimeZoneErrorText" Style="{StaticResource Editor.Error}" Text="{Binding TimeZoneError}" />
 
-                    <!-- Reminder -->
+                    <!-- Reminder: how long before the deadline, as days, hours and minutes laid out
+                         like the due time above. Each field is named "Reminder, days" and so on. -->
                     <TextBlock x:Name="ReminderLabel"
                                Style="{StaticResource Text.Label}"
                                Margin="0,16,0,0"
                                Text="{Binding [Editor.Label.Reminder], Source={StaticResource Loc}}" />
-                    <ComboBox x:Name="ReminderComboBox"
-                              Margin="0,4,0,0"
-                              Style="{StaticResource ComboBox.Field}"
-                              ItemsSource="{Binding ReminderOptions}"
-                              DisplayMemberPath="Label"
-                              ItemContainerStyle="{StaticResource Editor.ReminderItem}"
-                              SelectedItem="{Binding Reminder}"
-                              AutomationProperties.LabeledBy="{Binding ElementName=ReminderLabel}"
-                              AutomationProperties.HelpText="{Binding ReminderError}" />
+                    <Grid Margin="0,4,0,0" HorizontalAlignment="Left" DataContext="{Binding Reminder}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="84" />
+                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="84" />
+                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="84" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Style="{StaticResource Text.Label}"
+                                   Text="{Binding [Reminder.Label.Days], Source={StaticResource Loc}}" />
+                        <TextBox x:Name="ReminderDaysTextBox"
+                                 Grid.Row="1"
+                                 Margin="0,4,0,0"
+                                 Style="{StaticResource TextBox.Field}"
+                                 MaxLength="3"
+                                 Text="{Binding Days, UpdateSourceTrigger=PropertyChanged}"
+                                 AutomationProperties.Name="{Binding [Reminder.A11y.Days], Source={StaticResource Loc}}"
+                                 AutomationProperties.HelpText="{Binding Error}" />
+
+                        <TextBlock Grid.Column="2"
+                                   Style="{StaticResource Text.Label}"
+                                   Text="{Binding [Reminder.Label.Hours], Source={StaticResource Loc}}" />
+                        <TextBox x:Name="ReminderHoursTextBox"
+                                 Grid.Row="1"
+                                 Grid.Column="2"
+                                 Margin="0,4,0,0"
+                                 Style="{StaticResource TextBox.Field}"
+                                 MaxLength="2"
+                                 Text="{Binding Hours, UpdateSourceTrigger=PropertyChanged}"
+                                 AutomationProperties.Name="{Binding [Reminder.A11y.Hours], Source={StaticResource Loc}}"
+                                 AutomationProperties.HelpText="{Binding Error}" />
+
+                        <TextBlock Grid.Column="4"
+                                   Style="{StaticResource Text.Label}"
+                                   Text="{Binding [Reminder.Label.Minutes], Source={StaticResource Loc}}" />
+                        <TextBox x:Name="ReminderMinutesTextBox"
+                                 Grid.Row="1"
+                                 Grid.Column="4"
+                                 Margin="0,4,0,0"
+                                 Style="{StaticResource TextBox.Field}"
+                                 MaxLength="2"
+                                 Text="{Binding Minutes, UpdateSourceTrigger=PropertyChanged}"
+                                 AutomationProperties.Name="{Binding [Reminder.A11y.Minutes], Source={StaticResource Loc}}"
+                                 AutomationProperties.HelpText="{Binding Error}" />
+                    </Grid>
                     <TextBlock x:Name="ReminderErrorText" Style="{StaticResource Editor.Error}" Text="{Binding ReminderError}" />
+                    <TextBlock Style="{StaticResource Text.Caption}"
+                               Margin="0,4,0,0"
+                               Text="{Binding [Reminder.Hint], Source={StaticResource Loc}}" />
 
                     <CheckBox Style="{StaticResource CheckBox.Field}"
                               Margin="0,20,0,0"

@@ -10,8 +10,9 @@
       in dialogs, that factor times the width factor in the main panel. 12 DIP is the minimum.
     • Every interactive style keeps a keyboard focus ring (FocusRing); none sets it to {x:Null}.
     • Every text slot either wraps or trims; slots that trim are paired with a ToolTip in the view.
-    • Colour contrast: text brushes are ≥ 6.9:1 on Paper, and ≥ 4.5:1 at the 85 % minimum panel
-      opacity over any desktop. RuleBrush is decorative only and never used for text.
+    • Colour contrast: text brushes are ≥ 6.9:1 on Paper, and ≥ 4.5:1 at 85 % panel opacity or
+      more over any desktop (below that, down to the 20 % minimum, it depends on the desktop).
+      RuleBrush is decorative only and never used for text.
 -->
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"

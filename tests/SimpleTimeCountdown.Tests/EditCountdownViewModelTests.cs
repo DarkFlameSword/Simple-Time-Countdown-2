@@ -1,5 +1,6 @@
 using TimeCountdown.Models;
 using TimeCountdown.Services;
+using TimeCountdown.ViewModels;
 using TimeCountdown.Views;
 using Xunit;
 
@@ -101,6 +102,62 @@ public sealed class EditCountdownViewModelTests
             Assert.Equal(existing.Id, result.Id);
             Assert.Equal(existing.CreatedAt, result.CreatedAt);
             Assert.Equal(existing.TargetAt, result.TargetAt);
+        });
+    }
+
+    [Fact]
+    public void TheReminderIsShownAndSavedAsDaysHoursAndMinutes()
+    {
+        Sta.Run(() =>
+        {
+            LocalizationService.Instance.SetLanguage(LocalizationService.English);
+            var form = new EditCountdownViewModel(null, 2 * 24 * 60 + 3 * 60 + 4, TimeZoneInfo.Local.Id);
+            Assert.Equal(("2", "3", "4"), (form.Reminder.Days, form.Reminder.Hours, form.Reminder.Minutes));
+
+            form.Title = "Visa";
+            form.Reminder.Days = "";
+            form.Reminder.Hours = "５";
+            form.Reminder.Minutes = "30";
+
+            Assert.Equal(EditorField.None, form.Validate());
+            Assert.Equal(5 * 60 + 30, form.CreateResult().ReminderMinutesBefore);
+        });
+    }
+
+    [Fact]
+    public void AllReminderFieldsAtZeroMeanNoReminder()
+    {
+        Sta.Run(() =>
+        {
+            var form = NewForm();
+            form.Title = "Visa";
+            form.Reminder.Hours = "0";
+
+            Assert.Equal(EditorField.None, form.Validate());
+            Assert.Equal(0, form.CreateResult().ReminderMinutesBefore);
+        });
+    }
+
+    [Fact]
+    public void AReminderFieldOutOfRangeIsReportedOnlyOnceSaved()
+    {
+        Sta.Run(() =>
+        {
+            var form = NewForm();
+            form.Title = "Visa";
+            form.Reminder.Minutes = "75";
+
+            Assert.False(form.HasErrors);
+            Assert.Equal(EditorField.Reminder, form.Validate());
+            Assert.Equal(ReminderPart.Minutes, form.Reminder.FirstInvalidPart);
+            Assert.False(string.IsNullOrEmpty(form.ReminderError));
+            Assert.NotEmpty(form.Reminder.GetErrors(nameof(ReminderLeadTimeInput.Minutes)));
+            Assert.Empty(form.Reminder.GetErrors(nameof(ReminderLeadTimeInput.Hours)));
+
+            form.Reminder.Minutes = "5";
+
+            Assert.Equal("", form.ReminderError);
+            Assert.False(form.HasErrors);
         });
     }
 

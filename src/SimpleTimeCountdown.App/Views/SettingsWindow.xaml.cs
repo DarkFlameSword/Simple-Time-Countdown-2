@@ -31,6 +31,10 @@ public partial class SettingsWindow : Window
     private readonly MainWindowViewModel _viewModel;
     private readonly MainWindow? _mainWindow;
 
+    // The default reminder's days, hours and minutes. Settings apply as they are made, so its
+    // message shows from the start rather than after a save.
+    private readonly ReminderLeadTimeInput _defaultReminder;
+
     // The "Launch at startup" value Windows last refused to move away from, while its message shows.
     private bool? _refusedStartupValue;
 
@@ -48,6 +52,9 @@ public partial class SettingsWindow : Window
         _viewModel = viewModel;
         _mainWindow = mainWindow;
         DataContext = viewModel;
+        _defaultReminder = new ReminderLeadTimeInput(viewModel.DefaultReminderMinutesBefore) { ShowErrors = true };
+        _defaultReminder.PropertyChanged += DefaultReminderOnPropertyChanged;
+        DefaultReminderFields.DataContext = _defaultReminder;
 
         // Owner may only be a window that has been shown, so a panel that never was cannot own it.
         if (mainWindow is not null && new WindowInteropHelper(mainWindow).Handle != IntPtr.Zero)
@@ -63,6 +70,7 @@ public partial class SettingsWindow : Window
         Loaded += (_, _) => KeepOnScreen();
         _viewModel.StatusMessageRequested += ViewModelOnStatusMessageRequested;
         _viewModel.PropertyChanged += ViewModelOnPropertyChanged;
+        LocalizationService.Instance.PropertyChanged += LocalizationOnPropertyChanged;
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -87,6 +95,7 @@ public partial class SettingsWindow : Window
         base.OnClosed(e);
         _viewModel.StatusMessageRequested -= ViewModelOnStatusMessageRequested;
         _viewModel.PropertyChanged -= ViewModelOnPropertyChanged;
+        LocalizationService.Instance.PropertyChanged -= LocalizationOnPropertyChanged;
         _viewModel.FlushPendingPersist();
     }
 
@@ -96,7 +105,7 @@ public partial class SettingsWindow : Window
         // check box is in this dialog. A refusal leaves the setting where it was.
         _refusedStartupValue = _viewModel.LaunchAtStartup;
         StartupError.Text = message;
-        AnnounceStartupError();
+        Announce(StartupError);
     }
 
     private void ViewModelOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -112,16 +121,40 @@ public partial class SettingsWindow : Window
         }
     }
 
+    // Every valid entry applies at once; while a field is out of range the saved default stays as
+    // it was and the message under the fields says why.
+    private void DefaultReminderOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(ReminderLeadTimeInput.TotalMinutes) when _defaultReminder.TotalMinutes is { } minutes:
+                _viewModel.DefaultReminderMinutesBefore = minutes;
+                break;
+            case nameof(ReminderLeadTimeInput.Error):
+                Announce(DefaultReminderError);
+                break;
+        }
+    }
+
+    private void LocalizationOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(LocalizationService.CurrentLanguageCode))
+        {
+            _defaultReminder.RefreshMessage();
+        }
+    }
+
     // WPF does not announce live regions by itself. Raised once layout has run, so the message is
-    // visible to UI Automation and is read after the check box has snapped back.
-    private void AnnounceStartupError()
+    // visible to UI Automation and is read after any change that caused it (such as the startup
+    // check box snapping back).
+    private void Announce(TextBlock region)
     {
         Dispatcher.InvokeAsync(
             () =>
             {
-                if (StartupError.Text.Length > 0 && AutomationPeer.ListenerExists(AutomationEvents.LiveRegionChanged))
+                if (region.Text.Length > 0 && AutomationPeer.ListenerExists(AutomationEvents.LiveRegionChanged))
                 {
-                    UIElementAutomationPeer.CreatePeerForElement(StartupError)?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+                    UIElementAutomationPeer.CreatePeerForElement(region)?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
                 }
             },
             DispatcherPriority.Background);

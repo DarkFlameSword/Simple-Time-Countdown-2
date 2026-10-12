@@ -208,19 +208,84 @@
                               Content="{Binding [Settings.HideToTray], Source={StaticResource Loc}}"
                               IsChecked="{Binding HideOnCloseToTray}" />
 
-                    <!-- Both option lists are rebuilt on a language switch; SelectionWriteBack keeps the
-                         boxes showing the saved choice afterwards (see the converter). -->
+                    <!-- The default reminder as days, hours and minutes, like the editor's. The fields
+                         bind to their own input (set in code), which applies each valid value at once
+                         and otherwise shows why it is not applied. -->
                     <TextBlock Style="{StaticResource Text.Label}"
                                Margin="0,16,0,0"
                                Text="{Binding [Settings.DefaultReminder], Source={StaticResource Loc}}" />
-                    <ComboBox Style="{StaticResource ComboBox.Field}"
-                              Margin="0,4,0,0"
-                              DisplayMemberPath="Label"
-                              SelectedValuePath="Minutes"
-                              ItemsSource="{Binding ReminderOptions}"
-                              SelectedValue="{Binding DefaultReminderMinutesBefore, Converter={StaticResource SelectionWriteBack}}"
-                              AutomationProperties.Name="{Binding [Settings.DefaultReminder], Source={StaticResource Loc}}" />
+                    <StackPanel x:Name="DefaultReminderFields">
+                        <Grid Margin="0,4,0,0" HorizontalAlignment="Left">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="84" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="84" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="84" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
 
+                            <TextBlock Style="{StaticResource Text.Label}"
+                                       Text="{Binding [Reminder.Label.Days], Source={StaticResource Loc}}" />
+                            <TextBox x:Name="DefaultReminderDaysBox"
+                                     Grid.Row="1"
+                                     Margin="0,4,0,0"
+                                     Style="{StaticResource TextBox.Field}"
+                                     MaxLength="3"
+                                     Text="{Binding Days, UpdateSourceTrigger=PropertyChanged}"
+                                     AutomationProperties.Name="{Binding [Settings.DefaultReminder.A11y.Days], Source={StaticResource Loc}}"
+                                     AutomationProperties.HelpText="{Binding Error}" />
+
+                            <TextBlock Grid.Column="2"
+                                       Style="{StaticResource Text.Label}"
+                                       Text="{Binding [Reminder.Label.Hours], Source={StaticResource Loc}}" />
+                            <TextBox x:Name="DefaultReminderHoursBox"
+                                     Grid.Row="1"
+                                     Grid.Column="2"
+                                     Margin="0,4,0,0"
+                                     Style="{StaticResource TextBox.Field}"
+                                     MaxLength="2"
+                                     Text="{Binding Hours, UpdateSourceTrigger=PropertyChanged}"
+                                     AutomationProperties.Name="{Binding [Settings.DefaultReminder.A11y.Hours], Source={StaticResource Loc}}"
+                                     AutomationProperties.HelpText="{Binding Error}" />
+
+                            <TextBlock Grid.Column="4"
+                                       Style="{StaticResource Text.Label}"
+                                       Text="{Binding [Reminder.Label.Minutes], Source={StaticResource Loc}}" />
+                            <TextBox x:Name="DefaultReminderMinutesBox"
+                                     Grid.Row="1"
+                                     Grid.Column="4"
+                                     Margin="0,4,0,0"
+                                     Style="{StaticResource TextBox.Field}"
+                                     MaxLength="2"
+                                     Text="{Binding Minutes, UpdateSourceTrigger=PropertyChanged}"
+                                     AutomationProperties.Name="{Binding [Settings.DefaultReminder.A11y.Minutes], Source={StaticResource Loc}}"
+                                     AutomationProperties.HelpText="{Binding Error}" />
+                        </Grid>
+                        <TextBlock x:Name="DefaultReminderError"
+                                   Margin="0,4,0,0"
+                                   Text="{Binding Error}"
+                                   AutomationProperties.LiveSetting="Assertive">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock" BasedOn="{StaticResource Text.Error}">
+                                    <Style.Triggers>
+                                        <Trigger Property="Text" Value="">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <TextBlock Style="{StaticResource Text.Caption}"
+                                   Margin="0,4,0,0"
+                                   Text="{Binding [Reminder.Hint], Source={StaticResource Loc}}" />
+                    </StackPanel>
+
+                    <!-- The zone list is rebuilt on a language switch; SelectionWriteBack keeps the box
+                         showing the saved choice afterwards (see the converter). -->
                     <TextBlock Style="{StaticResource Text.Label}"
                                Margin="0,16,0,0"
                                Text="{Binding [Settings.DefaultTimeZone], Source={StaticResource Loc}}" />

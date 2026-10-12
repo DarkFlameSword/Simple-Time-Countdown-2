@@ -245,6 +245,9 @@ public sealed class LocalizationService : INotifyPropertyChanged
             ["Settings.StartupOpenSettings"] = "Open Windows startup settings",
             ["Settings.HideToTray"] = "Keep running in the tray when the panel is closed",
             ["Settings.DefaultReminder"] = "Default reminder",
+            ["Settings.DefaultReminder.A11y.Days"] = "Default reminder, days",
+            ["Settings.DefaultReminder.A11y.Hours"] = "Default reminder, hours",
+            ["Settings.DefaultReminder.A11y.Minutes"] = "Default reminder, minutes",
             ["Settings.DefaultTimeZone"] = "Default time zone",
             ["Settings.ThresholdHint"] = "Countdowns due within the first limit are Perilous and within the second are Urgent; later ones are Standing. Passed deadlines are Overdue.",
             ["Settings.Threshold.Perilous"] = "Perilous when due within",
@@ -281,7 +284,7 @@ public sealed class LocalizationService : INotifyPropertyChanged
             ["Validation.MissingDate"] = "Choose a valid due date.",
             ["Validation.MissingTime"] = "Choose an hour and a minute.",
             ["Validation.MissingTimeZone"] = "Choose a time zone.",
-            ["Validation.MissingReminder"] = "Choose a reminder.",
+            ["Validation.InvalidReminder"] = "Enter whole numbers: 0–{0} days, 0–{1} hours and 0–{2} minutes.",
             ["Validation.InvalidTime"] = "That time is skipped by a daylight-saving change in this time zone. Choose another time.",
             ["Validation.DateOutOfRange"] = "Choose a date between {0} and {1}.",
 
@@ -306,11 +309,13 @@ public sealed class LocalizationService : INotifyPropertyChanged
             ["Error.StateTrimmedPending"] = "Some saved countdowns were longer than the app supports, so they were shortened or left out. The original file could not be copied yet (another program may be using it). It has been left unchanged, and it will be moved to the following location before the app saves anything:\n{0}",
 
             // ===== Option lists =====
-            ["Reminder.None"] = "No reminder",
-            ["Reminder.15m"] = "15 minutes before",
-            ["Reminder.1h"] = "1 hour before",
-            ["Reminder.1d"] = "1 day before",
-            ["Reminder.3d"] = "3 days before"
+            ["Reminder.Label.Days"] = "DAYS",
+            ["Reminder.Label.Hours"] = "HOURS",
+            ["Reminder.Label.Minutes"] = "MINUTES",
+            ["Reminder.A11y.Days"] = "Reminder, days",
+            ["Reminder.A11y.Hours"] = "Reminder, hours",
+            ["Reminder.A11y.Minutes"] = "Reminder, minutes",
+            ["Reminder.Hint"] = "How long before the deadline to remind you. Leave all three at 0 for no reminder."
         };
     }
 
@@ -431,6 +436,9 @@ public sealed class LocalizationService : INotifyPropertyChanged
             ["Settings.StartupOpenSettings"] = "打开 Windows 启动设置",
             ["Settings.HideToTray"] = "关闭面板后继续在托盘中运行",
             ["Settings.DefaultReminder"] = "默认提醒",
+            ["Settings.DefaultReminder.A11y.Days"] = "默认提醒：天",
+            ["Settings.DefaultReminder.A11y.Hours"] = "默认提醒：时",
+            ["Settings.DefaultReminder.A11y.Minutes"] = "默认提醒：分",
             ["Settings.DefaultTimeZone"] = "默认时区",
             ["Settings.ThresholdHint"] = "在第一个期限内到期的倒计时为“紧急”，在第二个期限内到期的为“即将到期”，更晚的为“正常”；已过截止时间的为“已过期”。",
             ["Settings.Threshold.Perilous"] = "“紧急”：距截止不足",
@@ -467,7 +475,7 @@ public sealed class LocalizationService : INotifyPropertyChanged
             ["Validation.MissingDate"] = "请选择有效的截止日期。",
             ["Validation.MissingTime"] = "请选择时和分。",
             ["Validation.MissingTimeZone"] = "请选择时区。",
-            ["Validation.MissingReminder"] = "请选择提醒方式。",
+            ["Validation.InvalidReminder"] = "请输入整数：天 0–{0}，时 0–{1}，分 0–{2}。",
             ["Validation.InvalidTime"] = "该时区在此时刻因夏令时切换而不存在，请选择其他时间。",
             ["Validation.DateOutOfRange"] = "请选择 {0} 至 {1} 之间的日期。",
 
@@ -492,11 +500,13 @@ public sealed class LocalizationService : INotifyPropertyChanged
             ["Error.StateTrimmedPending"] = "部分已保存的倒计时超出了应用支持的长度或数量，已被截短或略去。原始文件暂时无法复制（可能有其他程序正在使用它）。该文件未被改动，应用在保存任何内容之前会先把它移到：\n{0}",
 
             // ===== Option lists =====
-            ["Reminder.None"] = "不提醒",
-            ["Reminder.15m"] = "提前 15 分钟",
-            ["Reminder.1h"] = "提前 1 小时",
-            ["Reminder.1d"] = "提前 1 天",
-            ["Reminder.3d"] = "提前 3 天"
+            ["Reminder.Label.Days"] = "天",
+            ["Reminder.Label.Hours"] = "时",
+            ["Reminder.Label.Minutes"] = "分",
+            ["Reminder.A11y.Days"] = "提醒：天",
+            ["Reminder.A11y.Hours"] = "提醒：时",
+            ["Reminder.A11y.Minutes"] = "提醒：分",
+            ["Reminder.Hint"] = "在截止前多久提醒你；三项都为 0 则不提醒。"
         };
     }
 }

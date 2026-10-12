@@ -7,17 +7,6 @@ namespace TimeCountdown.Services;
 
 public static partial class OptionCatalog
 {
-    // The reminder lead times the app offers. Saved values are snapped to these on load, so the
-    // editor's picker can always show what an item actually uses.
-    private static readonly (int Minutes, string LabelKey)[] ReminderChoices =
-    [
-        (0, "Reminder.None"),
-        (15, "Reminder.15m"),
-        (60, "Reminder.1h"),
-        (24 * 60, "Reminder.1d"),
-        (3 * 24 * 60, "Reminder.3d")
-    ];
-
     // UI culture the cached TimeZoneInfo display names were resolved in (see EnsureZoneNamesMatchUiCulture).
     private static string? _zoneNamesCulture;
 
@@ -38,23 +27,6 @@ public static partial class OptionCatalog
             .ThenBy(static entry => entry.Option.DisplayName, StringComparer.CurrentCulture)
             .Select(static entry => entry.Option)
             .ToList();
-    }
-
-    public static IReadOnlyList<ReminderOption> GetReminderOptions()
-    {
-        var loc = LocalizationService.Instance;
-        return ReminderChoices.Select(choice => new ReminderOption(choice.Minutes, loc[choice.LabelKey])).ToList();
-    }
-
-    /// <summary>
-    /// The offered reminder lead time closest to <paramref name="minutes"/>; used to repair values
-    /// from an older or hand-edited state file.
-    /// </summary>
-    public static int SnapReminderMinutes(int minutes)
-    {
-        return ReminderChoices
-            .Select(static choice => choice.Minutes)
-            .MinBy(choice => Math.Abs((long)choice - minutes));
     }
 
     public static TimeZoneInfo ResolveTimeZone(string timeZoneId)

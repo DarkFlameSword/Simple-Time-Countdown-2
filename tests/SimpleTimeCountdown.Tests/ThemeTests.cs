@@ -7,10 +7,10 @@ namespace TimeCountdown.Tests;
 
 public sealed class ThemeTests
 {
-    private const double MinimumPanelOpacity = ViewModels.MainWindowViewModel.MinPanelOpacity;
-
-    // Every brush that carries text must stay readable (WCAG AA, 4.5:1) even at the lowest panel
-    // opacity composited over a black, white or mid-grey desktop.
+    // The panel can be faded to 20 %, where the desktop decides how readable it is; from this
+    // opacity up, every brush that carries text stays readable (WCAG AA, 4.5:1) composited over a
+    // black, white or mid-grey desktop.
+    private const double FullContrastPanelOpacity = 0.85;
     private static readonly string[] TextBrushes =
     [
         "InkBrush", "InkSoftBrush", "InkFaintBrush", "AccentBrush",
@@ -30,8 +30,8 @@ public sealed class ThemeTests
                 Assert.True(Contrast(ink, paper) >= 6.5, $"{key} is {Contrast(ink, paper):0.00}:1 on paper");
                 foreach (var desktop in new[] { Colors.Black, Colors.White, Color.FromRgb(0x80, 0x80, 0x80) })
                 {
-                    var ratio = Contrast(Blend(ink, desktop, MinimumPanelOpacity), Blend(paper, desktop, MinimumPanelOpacity));
-                    Assert.True(ratio >= 4.5, $"{key} drops to {ratio:0.00}:1 at {MinimumPanelOpacity:P0} opacity over {desktop}");
+                    var ratio = Contrast(Blend(ink, desktop, FullContrastPanelOpacity), Blend(paper, desktop, FullContrastPanelOpacity));
+                    Assert.True(ratio >= 4.5, $"{key} drops to {ratio:0.00}:1 at {FullContrastPanelOpacity:P0} opacity over {desktop}");
                 }
             }
         });

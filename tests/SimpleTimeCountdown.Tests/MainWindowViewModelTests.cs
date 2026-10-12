@@ -177,6 +177,42 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     [Fact]
+    public void ArchivingACountdownUnpinsItAndArchivedCountdownsCannotBePinned()
+    {
+        Sta.Run(() =>
+        {
+            var pinned = Item("Pinned", DateTimeOffset.Now.AddDays(30));
+            pinned.IsPinned = true;
+            using var viewModel = CreateViewModel(pinned, Item("Sooner", DateTimeOffset.Now.AddDays(1)));
+            var card = viewModel.Countdowns.Single(item => item.Title == "Pinned");
+
+            viewModel.ArchiveCountdown(card);
+
+            Assert.False(card.IsPinned);
+            Assert.Equal(["Sooner", "Pinned"], viewModel.Countdowns.Select(item => item.Title));
+
+            viewModel.TogglePin(card);
+
+            Assert.False(card.IsPinned);
+        });
+    }
+
+    [Fact]
+    public void PanelOpacityGoesDownToTwentyPercentAndNoFurther()
+    {
+        Sta.Run(() =>
+        {
+            using var viewModel = CreateViewModel();
+
+            viewModel.PanelOpacity = 0.2;
+            Assert.Equal(0.2, viewModel.PanelOpacity);
+
+            viewModel.PanelOpacity = 0.05;
+            Assert.Equal(0.2, viewModel.PanelOpacity);
+        });
+    }
+
+    [Fact]
     public void AFailedSaveIsReportedAndRetriedInsteadOfThrowing()
     {
         Sta.Run(() =>

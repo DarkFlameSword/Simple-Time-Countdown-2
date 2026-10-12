@@ -74,7 +74,6 @@ public sealed class EditCountdownViewModel : ObservableObject, INotifyDataErrorI
     private int? _hour;
     private int? _minute;
     private TimeZoneOption? _timeZone;
-    private ReminderOption? _reminder;
     private bool _isPinned;
     private CounterStage _titleCounterStage;
     private CounterStage _noteCounterStage;
@@ -89,7 +88,6 @@ public sealed class EditCountdownViewModel : ObservableObject, INotifyDataErrorI
     private string _dateError = string.Empty;
     private string _timeError = string.Empty;
     private string _timeZoneError = string.Empty;
-    private string _reminderError = string.Empty;
 
     /// <param name="existing">The countdown to edit, or null to create one.</param>
     /// <param name="defaultReminderMinutes">Reminder preselected for a new countdown.</param>
@@ -98,7 +96,6 @@ public sealed class EditCountdownViewModel : ObservableObject, INotifyDataErrorI
     {
         _existing = existing;
         TimeZoneOptions = OptionCatalog.GetTimeZoneOptions(_loc.CurrentLanguageCode);
-        ReminderOptions = OptionCatalog.GetReminderOptions();
 
         var zone = OptionCatalog.ResolveTimeZone(existing?.TimeZoneId ?? defaultTimeZoneId);
         var due = ToZoneTime(existing?.TargetAt ?? DateTimeOffset.Now.AddDays(1), zone);
@@ -113,8 +110,8 @@ public sealed class EditCountdownViewModel : ObservableObject, INotifyDataErrorI
         _minute = _loadedLocalTime.Minute;
         _timeZone = TimeZoneOptions.FirstOrDefault(option => option.Id == zone.Id) ?? TimeZoneOptions.FirstOrDefault();
 
-        var reminderMinutes = existing?.ReminderMinutesBefore ?? defaultReminderMinutes;
-        _reminder = ReminderOptions.FirstOrDefault(option => option.Minutes == reminderMinutes) ?? ReminderOptions[0];
+        Reminder = new ReminderLeadTimeInput(existing?.ReminderMinutesBefore ?? defaultReminderMinutes);
+        Reminder.PropertyChanged += OnReminderPropertyChanged;
 
         _titleCounterStage = GetCounterStage(SavedLength(_title), _title.Length, TextInput.MaxTitleLength);
         _noteCounterStage = GetCounterStage(SavedLength(_note), _note.Length, TextInput.MaxNoteLength);
@@ -136,8 +133,6 @@ public sealed class EditCountdownViewModel : ObservableObject, INotifyDataErrorI
     public IReadOnlyList<int> Minutes => MinuteValues;
 
     public IReadOnlyList<TimeZoneOption> TimeZoneOptions { get; }
-
-    public IReadOnlyList<ReminderOption> ReminderOptions { get; }
 
     public string Title
     {
@@ -193,17 +188,8 @@ public sealed class EditCountdownViewModel : ObservableObject, INotifyDataErrorI
         set => SetScheduleField(ref _timeZone, value);
     }
 
-    public ReminderOption? Reminder
-    {
-        get => _reminder;
-        set
-        {
-            if (SetProperty(ref _reminder, value))
-            {
-                Revalidate();
-            }
-        }
-    }
+    /// <summary>The reminder's days, hours and minutes, which validate themselves once shown.</summary>
+    public ReminderLeadTimeInput Reminder { get; }
 
     public bool IsPinned
     {
@@ -286,15 +272,11 @@ public sealed class EditCountdownViewModel : ObservableObject, INotifyDataErrorI
         private set => SetError(ref _timeZoneError, value, nameof(TimeZoneError), nameof(TimeZone));
     }
 
-    public string ReminderError
-    {
-        get => _reminderError;
-        private set => SetError(ref _reminderError, value, nameof(ReminderError), nameof(Reminder));
-    }
+    public string ReminderError => Reminder.Error;
 
     public bool HasErrors =>
         _titleError.Length > 0 || _dateError.Length > 0 || _timeError.Length > 0 ||
-        _timeZoneError.Length > 0 || _reminderError.Length > 0;
+        _timeZoneError.Length > 0 || Reminder.HasErrors;
 
     /// <summary>
     /// The chosen date and time as a zone-local wall-clock time, or null while the date is
@@ -319,7 +301,6 @@ public sealed class EditCountdownViewModel : ObservableObject, INotifyDataErrorI
             nameof(Date) => _dateError,
             nameof(Hour) or nameof(Minute) => _timeError,
             nameof(TimeZone) => _timeZoneError,
-            nameof(Reminder) => _reminderError,
             _ => string.Empty
         };
         return message.Length > 0 ? new[] { message } : Array.Empty<string>();
@@ -333,6 +314,7 @@ public sealed class EditCountdownViewModel : ObservableObject, INotifyDataErrorI
     public EditorField Validate()
     {
         _showErrors = true;
+        Reminder.ShowErrors = true;
         return UpdateErrors();
     }
 
@@ -354,7 +336,7 @@ public sealed class EditCountdownViewModel : ObservableObject, INotifyDataErrorI
     /// <summary>The countdown the form describes. Call only after <see cref="Validate"/> returned None.</summary>
     public CountdownItem CreateResult()
     {
-        if (SelectedLocalTime is not { } local || _timeZone is null || _reminder is null)
+        if (SelectedLocalTime is not { } local || _timeZone is null || Reminder.TotalMinutes is not { } reminderMinutes)
         {
             throw new InvalidOperationException("The form must be validated before a countdown is created from it.");
         }
@@ -373,7 +355,7 @@ public sealed class EditCountdownViewModel : ObservableObject, INotifyDataErrorI
             TargetAt = target,
             TimeZoneId = zone.Id,
             IsPinned = _isPinned,
-            ReminderMinutesBefore = _reminder.Minutes
+            ReminderMinutesBefore = reminderMinutes
         };
     }
 
@@ -427,6 +409,16 @@ public sealed class EditCountdownViewModel : ObservableObject, INotifyDataErrorI
         return true;
     }
 
+    // The reminder keeps its own message; re-raise it here, where the window and HasErrors read it.
+    private void OnReminderPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ReminderLeadTimeInput.Error))
+        {
+            OnPropertyChanged(nameof(ReminderError));
+            OnPropertyChanged(nameof(HasErrors));
+        }
+    }
+
     private void UpdateScheduleNote()
     {
         var zone = _timeZone is null ? null : OptionCatalog.ResolveTimeZone(_timeZone.Id);
@@ -466,13 +458,12 @@ public sealed class EditCountdownViewModel : ObservableObject, INotifyDataErrorI
             : IsSkippedTime() ? _loc["Validation.InvalidTime"] : string.Empty;
 
         TimeZoneError = _timeZone is null ? _loc["Validation.MissingTimeZone"] : string.Empty;
-        ReminderError = _reminder is null ? _loc["Validation.MissingReminder"] : string.Empty;
 
         return TitleError.Length > 0 ? EditorField.Title
             : DateError.Length > 0 ? EditorField.Date
             : TimeError.Length > 0 ? EditorField.Time
             : TimeZoneError.Length > 0 ? EditorField.TimeZone
-            : ReminderError.Length > 0 ? EditorField.Reminder
+            : Reminder.FirstInvalidPart != ReminderPart.None ? EditorField.Reminder
             : EditorField.None;
     }
 

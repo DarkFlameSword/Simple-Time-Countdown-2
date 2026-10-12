@@ -12,7 +12,7 @@ namespace TimeCountdown.ViewModels;
 
 public sealed class MainWindowViewModel : ObservableObject, IDisposable
 {
-    public const double MinPanelOpacity = 0.85;
+    public const double MinPanelOpacity = 0.20;
     public const double MaxPanelOpacity = 1.0;
 
     // Settings changes are coalesced into one write after this idle period, so dragging a
@@ -27,7 +27,6 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private readonly DispatcherTimer _timer;
     private readonly DispatcherTimer _persistTimer;
     private readonly LocalizationService _localization = LocalizationService.Instance;
-    private IReadOnlyList<ReminderOption> _reminderOptions;
     private IReadOnlyList<TimeZoneOption> _timeZoneOptions;
     private CountdownThresholds _thresholds;
     private string _searchText = string.Empty;
@@ -58,7 +57,6 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _localization.SetLanguage(state.Settings.LanguageCode);
         _selectedLanguageCode = _localization.CurrentLanguageCode;
 
-        _reminderOptions = OptionCatalog.GetReminderOptions();
         _timeZoneOptions = OptionCatalog.GetTimeZoneOptions(_localization.CurrentLanguageCode);
 
         Countdowns = new ObservableCollection<CountdownItemViewModel>(
@@ -73,9 +71,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _showArchivedOnly = settings.ShowArchivedOnly;
         _hideOnCloseToTray = settings.HideOnCloseToTray;
         _launchAtStartup = SafeIsAutostartEnabled();
-        _defaultReminderMinutesBefore = _reminderOptions.Any(option => option.Minutes == settings.DefaultReminderMinutesBefore)
-            ? settings.DefaultReminderMinutesBefore
-            : _reminderOptions[0].Minutes;
+        _defaultReminderMinutesBefore = ReminderLeadTime.Clamp(settings.DefaultReminderMinutesBefore);
         _defaultTimeZoneId = _timeZoneOptions.Any(option => option.Id == settings.DefaultTimeZoneId)
             ? settings.DefaultTimeZoneId
             : TimeZoneInfo.Local.Id;
@@ -107,12 +103,6 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public ICollectionView ItemsView { get; }
 
     public AppSettings Settings => _state.Settings;
-
-    public IReadOnlyList<ReminderOption> ReminderOptions
-    {
-        get => _reminderOptions;
-        private set => SetProperty(ref _reminderOptions, value);
-    }
 
     public IReadOnlyList<TimeZoneOption> TimeZoneOptions
     {
@@ -268,7 +258,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         get => _defaultReminderMinutesBefore;
         set
         {
-            if (!ReminderOptions.Any(option => option.Minutes == value) ||
+            if (value is < 0 or > ReminderLeadTime.MaxTotalMinutes ||
                 !SetProperty(ref _defaultReminderMinutesBefore, value))
             {
                 return;
@@ -444,6 +434,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             var previous = existing.Model;
             item.IsArchived = previous.IsArchived;
             item.ArchivedAt = previous.ArchivedAt;
+            // Only active countdowns can be pinned.
+            item.IsPinned &= !item.IsArchived;
             if (previous.TargetAt == item.TargetAt && previous.ReminderMinutesBefore == item.ReminderMinutesBefore)
             {
                 // A wording change must not replay alerts that were already shown.
@@ -493,11 +485,15 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // Pinning only orders active countdowns, so a filed one gives up its pin (and stays
+        // unpinned if it is restored).
         item.Model.IsArchived = true;
         item.Model.ArchivedAt = DateTimeOffset.Now;
+        item.Model.IsPinned = false;
         item.Model.ReminderShown = true;
         item.Model.DueShown = true;
         item.NotifyModelChanged();
+        SortCountdowns();
         RefreshCountdowns(notify: false);
         RequestPersist();
     }
@@ -518,9 +514,14 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         RequestPersist();
     }
 
-    /// <summary>Pins or unpins a countdown; pinned countdowns sort ahead of the rest.</summary>
+    /// <summary>Pins or unpins an active countdown; pinned countdowns sort ahead of the rest.</summary>
     public void TogglePin(CountdownItemViewModel item)
     {
+        if (item.Model.IsArchived)
+        {
+            return;
+        }
+
         item.Model.IsPinned = !item.Model.IsPinned;
         item.NotifyModelChanged();
         SortCountdowns();
@@ -811,12 +812,10 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        ReminderOptions = OptionCatalog.GetReminderOptions();
         TimeZoneOptions = OptionCatalog.GetTimeZoneOptions(_localization.CurrentLanguageCode);
-        // The combo boxes lose their selection when their item lists are replaced. The setters
-        // ignore the null a combo box pushes meanwhile (views should not write it back either),
-        // and re-raising the unchanged values makes them select the matching new entries.
-        OnPropertyChanged(nameof(DefaultReminderMinutesBefore));
+        // The combo box loses its selection when its item list is replaced. The setter ignores
+        // the null the combo box pushes meanwhile (views should not write it back either), and
+        // re-raising the unchanged value makes it select the matching new entry.
         OnPropertyChanged(nameof(DefaultTimeZoneId));
         OnPropertyChanged(nameof(ArchiveToggleText));
         OnPropertyChanged(nameof(CloseButtonText));
