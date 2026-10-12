@@ -6,9 +6,9 @@ using System.Reflection;
 namespace TimeCountdown.Services;
 
 /// <summary>
-/// What the Settings "About" section shows and opens: the product version, the licence and
-/// third-party notices that ship next to the executable, the project's issue tracker and the
-/// diagnostics log folder.
+/// What the Settings "Privacy and data" and "About" sections show and open: the product version,
+/// the licence and third-party notices that ship next to the executable, the user guide, the
+/// project's issue tracker, and the folders that hold the user's data and the diagnostics log.
 /// </summary>
 public static class AboutInfo
 {
@@ -34,19 +34,32 @@ public static class AboutInfo
 
     public static void OpenIssueTracker() => Open(ProductConstants.ProjectUrl + "/issues");
 
-    public static void OpenLogFolder()
+    /// <summary>Opens the online user guide (the README) in the UI language.</summary>
+    public static void OpenUserGuide()
+    {
+        Open(LocalizationService.Instance.IsChinese
+            ? ProductConstants.ProjectUrl + "/blob/HEAD/README.zh-CN.md"
+            : ProductConstants.ProjectUrl + "#readme");
+    }
+
+    public static void OpenLogFolder() => OpenFolder(AppLog.LogDirectory, "log");
+
+    /// <summary>Opens the folder that holds the saved countdowns and settings (state.json).</summary>
+    public static void OpenDataFolder(string stateDirectory) => OpenFolder(stateDirectory, "data");
+
+    private static void OpenFolder(string path, string description)
     {
         try
         {
-            Directory.CreateDirectory(AppLog.LogDirectory);
+            Directory.CreateDirectory(path);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            AppLog.Warn("Creating the log folder failed.", ex);
+            AppLog.Warn($"Creating the {description} folder failed.", ex);
             return;
         }
 
-        Open(AppLog.LogDirectory);
+        Open(PackageInfo.ResolveForShell(path));
     }
 
     private static void Open(string target)

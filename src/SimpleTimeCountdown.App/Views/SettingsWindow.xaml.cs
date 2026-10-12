@@ -238,11 +238,15 @@ public partial class SettingsWindow : Window
         _mainWindow?.ResetWindowPlacement();
     }
 
+    private void OpenDataFolder_Click(object sender, RoutedEventArgs e) => AboutInfo.OpenDataFolder(_viewModel.DataDirectory);
+
+    private void OpenLogs_Click(object sender, RoutedEventArgs e) => AboutInfo.OpenLogFolder();
+
+    private void UserGuide_Click(object sender, RoutedEventArgs e) => AboutInfo.OpenUserGuide();
+
     private void LegalNotices_Click(object sender, RoutedEventArgs e) => AboutInfo.OpenLegalNotices();
 
     private void ReportProblem_Click(object sender, RoutedEventArgs e) => AboutInfo.OpenIssueTracker();
-
-    private void OpenLogs_Click(object sender, RoutedEventArgs e) => AboutInfo.OpenLogFolder();
 
     private void Done_Click(object sender, RoutedEventArgs e)
     {

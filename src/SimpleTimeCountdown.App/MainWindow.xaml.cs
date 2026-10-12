@@ -16,6 +16,7 @@ using TimeCountdown.Views;
 using ButtonBase = System.Windows.Controls.Primitives.ButtonBase;
 using KeyEventArgs = System.Windows.Input.KeyEventArgs;
 using Point = System.Windows.Point;
+using TextBoxBase = System.Windows.Controls.Primitives.TextBoxBase;
 using WpfBinding = System.Windows.Data.Binding;
 
 namespace TimeCountdown;
@@ -40,10 +41,14 @@ public partial class MainWindow : Window
 
     private static readonly TimeSpan StatusMessageDuration = TimeSpan.FromSeconds(8);
 
+    // How long the undo notice stays once the pointer and keyboard focus are elsewhere.
+    private static readonly TimeSpan UndoNoticeDuration = TimeSpan.FromSeconds(10);
+
     private readonly DesktopLayerService _desktopLayerService = new();
     private readonly LocalizationService _localization = LocalizationService.Instance;
     private readonly MainWindowViewModel _viewModel;
     private readonly DispatcherTimer _statusMessageTimer;
+    private readonly DispatcherTimer _undoTimer;
     private HwndSource? _hwndSource;
     private bool _isApplyingPresentationMode;
     private bool _sourceInitialized;
@@ -66,6 +71,9 @@ public partial class MainWindow : Window
             _statusMessageTimer.Stop();
             StatusMessageLabel.Visibility = Visibility.Collapsed;
         };
+
+        _undoTimer = new DispatcherTimer { Interval = UndoNoticeDuration };
+        _undoTimer.Tick += UndoTimer_OnTick;
 
         SetBinding(
             TopmostProperty,
@@ -159,6 +167,7 @@ public partial class MainWindow : Window
     {
         _isClosed = true;
         _statusMessageTimer.Stop();
+        _undoTimer.Stop();
         _hwndSource?.RemoveHook(WndProc);
         _viewModel.PropertyChanged -= ViewModelOnPropertyChanged;
         _viewModel.StatusMessageRequested -= ViewModelOnStatusMessageRequested;
@@ -188,17 +197,39 @@ public partial class MainWindow : Window
 
         var index = item is null ? -1 : CountdownList.Items.IndexOf(item);
         _viewModel.UpsertCountdown(result);
-        if (!CountdownList.Items.OfType<CountdownItemViewModel>().Any(vm => vm.Id == result.Id))
-        {
-            // The archive view or a search that does not match would hide the card just saved;
-            // show it rather than let it vanish with only the total count changing.
-            _viewModel.ShowArchivedOnly = result.IsArchived;
-            SearchToggle.IsChecked = false;
-            _viewModel.SearchText = string.Empty;
-        }
+        RevealCard(result.Id, result.IsArchived);
 
         // Saving replaces or adds a card; focus goes to its Edit button, scrolled into view.
         FocusCardLater(result.Id, index, EditButtonName);
+    }
+
+    /// <summary>
+    /// Makes sure the list shows the card with <paramref name="id"/>. The archive view, or a search
+    /// that does not match, would hide a card just saved or brought back; it is shown rather than
+    /// left to vanish with only the total count changing.
+    /// </summary>
+    private void RevealCard(Guid id, bool isArchived)
+    {
+        if (CountdownList.Items.OfType<CountdownItemViewModel>().Any(vm => vm.Id == id))
+        {
+            return;
+        }
+
+        _viewModel.ShowArchivedOnly = isArchived;
+        SearchToggle.IsChecked = false;
+        _viewModel.SearchText = string.Empty;
+    }
+
+    /// <summary>Takes back the last archive, restore or delete and puts focus on the card it brought back.</summary>
+    private void UndoLastAction()
+    {
+        if (_viewModel.Undo() is not { } card)
+        {
+            return;
+        }
+
+        RevealCard(card.Id, card.IsArchived);
+        FocusCardLater(card.Id, -1, null);
     }
 
     private bool? ShowModal(Window dialog)
@@ -214,12 +245,17 @@ public partial class MainWindow : Window
         }
     }
 
-    private MessageBoxResult ShowMessage(string text, string caption, MessageBoxButton buttons, MessageBoxImage image)
+    private MessageBoxResult ShowMessage(
+        string text,
+        string caption,
+        MessageBoxButton buttons,
+        MessageBoxImage image,
+        MessageBoxResult defaultResult = MessageBoxResult.None)
     {
         _modalDepth++;
         try
         {
-            return System.Windows.MessageBox.Show(this, text, caption, buttons, image);
+            return System.Windows.MessageBox.Show(this, text, caption, buttons, image, defaultResult);
         }
         finally
         {
@@ -309,6 +345,25 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (Keyboard.Modifiers == ModifierKeys.None)
+        {
+            switch (e.Key)
+            {
+                case Key.F1:
+                    e.Handled = true;
+                    AboutInfo.OpenUserGuide();
+                    break;
+                case Key.Escape when SearchToggle.IsChecked == true:
+                    // Anywhere in the panel, not only in the search box: an empty result tells
+                    // the user to press Esc, wherever focus happens to be.
+                    e.Handled = true;
+                    ClearOrCloseSearch();
+                    break;
+            }
+
+            return;
+        }
+
         if (Keyboard.Modifiers != ModifierKeys.Control)
         {
             return;
@@ -331,6 +386,11 @@ public partial class MainWindow : Window
             case Key.OemComma:
                 e.Handled = true;
                 OpenSettings();
+                break;
+            case Key.Z when _viewModel.CanUndo && Keyboard.FocusedElement is not TextBoxBase:
+                // In the search box Ctrl+Z keeps undoing typing.
+                e.Handled = true;
+                UndoLastAction();
                 break;
         }
     }
@@ -429,15 +489,9 @@ public partial class MainWindow : Window
         }
     }
 
-    private void SearchBox_OnPreviewKeyDown(object sender, KeyEventArgs e)
+    private void ClearOrCloseSearch()
     {
-        if (e.Key != Key.Escape)
-        {
-            return;
-        }
-
         // First Esc clears the query, the second closes the search row.
-        e.Handled = true;
         if (SearchBox.Text.Length > 0)
         {
             _viewModel.SearchText = string.Empty;
@@ -468,11 +522,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        // A warning that defaults to No, so a stray Enter keeps the countdown. An active countdown's
+        // prompt points to archiving, which keeps it without the clutter.
         var confirmed = ShowMessage(
-            _localization.Format("Message.DeletePrompt", item.Title),
+            _localization.Format(item.IsArchived ? "Message.DeletePromptArchived" : "Message.DeletePrompt", item.Title),
             _localization["Message.DeleteTitle"],
             MessageBoxButton.YesNo,
-            MessageBoxImage.Question);
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
 
         if (confirmed == MessageBoxResult.Yes)
         {
@@ -500,6 +557,24 @@ public partial class MainWindow : Window
             _viewModel.RestoreCountdown(item);
             FocusCardLater(null, index, null);
         }
+    }
+
+    private void Undo_Click(object sender, RoutedEventArgs e)
+    {
+        UndoLastAction();
+    }
+
+    private void UndoTimer_OnTick(object? sender, EventArgs e)
+    {
+        // Someone reading the notice or about to press Undo keeps it; it lapses one interval after
+        // the pointer and focus have moved on.
+        if (UndoNotice.IsMouseOver || UndoNotice.IsKeyboardFocusWithin)
+        {
+            return;
+        }
+
+        _undoTimer.Stop();
+        _viewModel.DismissUndo();
     }
 
     private void PinButton_OnToggled(object sender, RoutedEventArgs e)
@@ -731,9 +806,20 @@ public partial class MainWindow : Window
 
     private void ViewModelOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(MainWindowViewModel.DesktopLayerEnabled))
+        switch (e.PropertyName)
         {
-            ApplyPresentationMode();
+            case nameof(MainWindowViewModel.DesktopLayerEnabled):
+                ApplyPresentationMode();
+                break;
+            case nameof(MainWindowViewModel.CanUndo):
+                // Each new action gets the full time to be undone; a cleared one stops the clock.
+                _undoTimer.Stop();
+                if (_viewModel.CanUndo)
+                {
+                    _undoTimer.Start();
+                }
+
+                break;
         }
     }
 

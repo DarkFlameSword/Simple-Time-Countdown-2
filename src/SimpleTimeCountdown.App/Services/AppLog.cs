@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace TimeCountdown.Services;
 
@@ -10,12 +11,18 @@ namespace TimeCountdown.Services;
 /// A desktop widget that runs for weeks needs a trail to diagnose field failures, but must never
 /// fail because of it: every method swallows its own IO errors. One file is kept per day, each
 /// capped at <see cref="MaxFileBytes"/>, and only the newest <see cref="RetainedFiles"/> survive.
+///
+/// Users attach these files to public problem reports, so they hold only what a diagnosis needs:
+/// callers never log countdown text, and <see cref="Redact"/> writes the user's profile folder,
+/// which carries the account name, as %USERPROFILE%.
 /// </summary>
 public static class AppLog
 {
     private const long MaxFileBytes = 1024 * 1024;
     private const int RetainedFiles = 7;
+    private const string ProfilePlaceholder = "%USERPROFILE%";
     private static readonly object Gate = new();
+    private static readonly Regex? ProfilePath = BuildProfilePathPattern();
     private static bool _pruned;
 
     /// <summary>
@@ -35,15 +42,33 @@ public static class AppLog
 
     public static void Error(string message, Exception? exception = null) => Write("ERROR", message, exception);
 
+    /// <summary>
+    /// Replaces the user's profile folder (C:\Users\name) wherever <paramref name="text"/> names it,
+    /// on its own or at the start of a longer path, with %USERPROFILE%. A different folder whose
+    /// name merely starts the same way (C:\Users\name2) is left alone.
+    /// </summary>
+    public static string Redact(string text)
+    {
+        return ProfilePath is null ? text : ProfilePath.Replace(text, ProfilePlaceholder);
+    }
+
+    private static Regex? BuildProfilePathPattern()
+    {
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile).TrimEnd('\\', '/');
+        return profile.Length == 0
+            ? null
+            : new Regex(Regex.Escape(profile) + @"(?=$|[\\/""'\s:;,.)\]])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
+
     private static void Write(string level, string message, Exception? exception)
     {
         var line = new StringBuilder()
             .Append(DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss.fff zzz"))
             .Append(" [").Append(level).Append("] ")
-            .Append(message);
+            .Append(Redact(message));
         if (exception is not null)
         {
-            line.AppendLine().Append(exception);
+            line.AppendLine().Append(Redact(exception.ToString()));
         }
 
         Debug.WriteLine(line.ToString());

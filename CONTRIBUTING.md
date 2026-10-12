@@ -28,6 +28,9 @@ Don't try installs with the installer project itself: started with `dotnet run` 
 - Text must always display completely: wrap it, or trim it with an ellipsis and expose the full text in a tooltip and to screen readers. Give every text input a `MaxLength`, and let dialogs scroll rather than grow past the screen.
 - Keep everything usable from the keyboard with a visible focus ring, give icon-only buttons an `AutomationProperties.Name` and a tooltip, and check new UI in a High Contrast theme and at 150% scaling.
 - Never let a file or registry failure crash the app; log it with `AppLog`.
+- Let people recover from mistakes: an action that can be reversed gets an undo (see the panel's undo notice), and one that cannot asks first with the safe answer as the default. Forms ask before throwing away typed input.
+- Keep the app private by design: no network access, accounts or usage data, and nothing switched on that the user did not choose (autostart stays opt-in). Never write countdown text to the log, and keep `AppLog.Redact` in the path of everything it writes. Anything new the app stores must be described in **Settings > Privacy & data** and in both READMEs.
+- [docs/usability-privacy-review.md](docs/usability-privacy-review.md) maps the app to Nielsen's heuristics, ISO 9241-110/-171 and ISO/IEC 29100; update it when a change affects one of them.
 - Keep the release scripts working for the portable zip, `Setup.exe` and the MSIX. If you touch packaging, run `scripts\Build-SetupExe.ps1`; CI also runs `scripts\Test-SetupExe.ps1` and `scripts\Publish-MSIX.ps1`.
 
 ## Versions and icons

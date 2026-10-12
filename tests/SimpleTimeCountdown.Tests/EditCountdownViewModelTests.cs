@@ -1,6 +1,5 @@
 using TimeCountdown.Models;
 using TimeCountdown.Services;
-using TimeCountdown.ViewModels;
 using TimeCountdown.Views;
 using Xunit;
 
@@ -106,58 +105,59 @@ public sealed class EditCountdownViewModelTests
     }
 
     [Fact]
-    public void TheReminderIsShownAndSavedAsDaysHoursAndMinutes()
+    public void AFormHasChangesOnlyWhileItDiffersFromWhatItFirstShowed()
+    {
+        Sta.Run(() =>
+        {
+            var form = NewForm();
+            Assert.False(form.HasChanges);
+
+            form.Title = "Dentist";
+            Assert.True(form.HasChanges);
+
+            form.Title = string.Empty;
+            Assert.False(form.HasChanges);
+
+            form.IsPinned = true;
+            Assert.True(form.HasChanges);
+        });
+    }
+
+    [Fact]
+    public void ANewlyChosenTimeThatHasPassedIsPointedOut()
+    {
+        Sta.Run(() =>
+        {
+            var form = NewForm();
+            var pastDue = LocalizationService.Instance["Editor.PastDue"];
+            Assert.DoesNotContain(pastDue, form.ScheduleNote);
+
+            form.Date = DateTime.Today.AddDays(-2);
+            Assert.Contains(pastDue, form.ScheduleNote);
+
+            form.Date = DateTime.Today.AddDays(2);
+            Assert.DoesNotContain(pastDue, form.ScheduleNote);
+        });
+    }
+
+    [Fact]
+    public void AnOverdueCountdownIsNotFlaggedAgainWhenItsScheduleIsLeftAlone()
     {
         Sta.Run(() =>
         {
             LocalizationService.Instance.SetLanguage(LocalizationService.English);
-            var form = new EditCountdownViewModel(null, 2 * 24 * 60 + 3 * 60 + 4, TimeZoneInfo.Local.Id);
-            Assert.Equal(("2", "3", "4"), (form.Reminder.Days, form.Reminder.Hours, form.Reminder.Minutes));
+            var overdue = new CountdownItem
+            {
+                Title = "Library books",
+                TargetAt = DateTimeOffset.Now.AddDays(-3),
+                CreatedAt = DateTimeOffset.Now.AddDays(-20),
+                TimeZoneId = TimeZoneInfo.Local.Id
+            };
 
-            form.Title = "Visa";
-            form.Reminder.Days = "";
-            form.Reminder.Hours = "５";
-            form.Reminder.Minutes = "30";
+            var form = new EditCountdownViewModel(overdue, 60, TimeZoneInfo.Local.Id);
+            form.Title = "Return library books";
 
-            Assert.Equal(EditorField.None, form.Validate());
-            Assert.Equal(5 * 60 + 30, form.CreateResult().ReminderMinutesBefore);
-        });
-    }
-
-    [Fact]
-    public void AllReminderFieldsAtZeroMeanNoReminder()
-    {
-        Sta.Run(() =>
-        {
-            var form = NewForm();
-            form.Title = "Visa";
-            form.Reminder.Hours = "0";
-
-            Assert.Equal(EditorField.None, form.Validate());
-            Assert.Equal(0, form.CreateResult().ReminderMinutesBefore);
-        });
-    }
-
-    [Fact]
-    public void AReminderFieldOutOfRangeIsReportedOnlyOnceSaved()
-    {
-        Sta.Run(() =>
-        {
-            var form = NewForm();
-            form.Title = "Visa";
-            form.Reminder.Minutes = "75";
-
-            Assert.False(form.HasErrors);
-            Assert.Equal(EditorField.Reminder, form.Validate());
-            Assert.Equal(ReminderPart.Minutes, form.Reminder.FirstInvalidPart);
-            Assert.False(string.IsNullOrEmpty(form.ReminderError));
-            Assert.NotEmpty(form.Reminder.GetErrors(nameof(ReminderLeadTimeInput.Minutes)));
-            Assert.Empty(form.Reminder.GetErrors(nameof(ReminderLeadTimeInput.Hours)));
-
-            form.Reminder.Minutes = "5";
-
-            Assert.Equal("", form.ReminderError);
-            Assert.False(form.HasErrors);
+            Assert.DoesNotContain(LocalizationService.Instance["Editor.PastDue"], form.ScheduleNote);
         });
     }
 

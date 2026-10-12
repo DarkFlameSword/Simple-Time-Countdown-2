@@ -291,8 +291,7 @@
                              MaxLength="{x:Static services:TextInput.MaxSearchLength}"
                              controls:Hint.Text="{Binding [Main.Search.Placeholder], Source={StaticResource Loc}}"
                              AutomationProperties.Name="{Binding [Main.Search.Label], Source={StaticResource Loc}}"
-                             Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
-                             PreviewKeyDown="SearchBox_OnPreviewKeyDown" />
+                             Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" />
                     <Button Grid.Column="1"
                             Margin="8,0,0,0"
                             VerticalAlignment="Center"
@@ -548,6 +547,33 @@
                                Style="{StaticResource Text.Error}"
                                AutomationProperties.LiveSetting="Polite"
                                Visibility="Collapsed" />
+
+                    <!-- What the last archive, restore or delete did, and the way back (also Ctrl+Z).
+                         It lapses after a while, but never under the pointer or keyboard focus
+                         (see UndoTimer_OnTick). The text is announced once when the notice appears
+                         (IsVisibleChanged) and again when a new action replaces it (TargetUpdated). -->
+                    <Grid x:Name="UndoNotice"
+                          Margin="0,4,0,0"
+                          Visibility="{Binding CanUndo, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock VerticalAlignment="Center"
+                                   Style="{StaticResource Text.Body}"
+                                   Text="{Binding UndoText, NotifyOnTargetUpdated=True}"
+                                   TargetUpdated="LiveRegion_OnTargetUpdated"
+                                   IsVisibleChanged="LiveRegion_OnIsVisibleChanged"
+                                   AutomationProperties.LiveSetting="Polite" />
+                        <!-- Pulled right by the link's padding so its text lines up with the footer's edge. -->
+                        <Button Grid.Column="1"
+                                Margin="12,0,-6,0"
+                                VerticalAlignment="Center"
+                                Style="{StaticResource Button.Link}"
+                                Click="Undo_Click"
+                                Content="{Binding [Main.Undo.Button], Source={StaticResource Loc}}"
+                                ToolTip="{Binding [Main.Undo.Tooltip], Source={StaticResource Loc}}" />
+                    </Grid>
                 </StackPanel>
 
                 <!-- Resize affordance in the sheet's own corner. It lies inside the 16 DIP square

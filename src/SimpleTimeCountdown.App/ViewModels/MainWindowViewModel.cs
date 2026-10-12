@@ -12,7 +12,7 @@ namespace TimeCountdown.ViewModels;
 
 public sealed class MainWindowViewModel : ObservableObject, IDisposable
 {
-    public const double MinPanelOpacity = 0.20;
+    public const double MinPanelOpacity = 0.85;
     public const double MaxPanelOpacity = 1.0;
 
     // Settings changes are coalesced into one write after this idle period, so dragging a
@@ -27,6 +27,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private readonly DispatcherTimer _timer;
     private readonly DispatcherTimer _persistTimer;
     private readonly LocalizationService _localization = LocalizationService.Instance;
+    private IReadOnlyList<ReminderOption> _reminderOptions;
     private IReadOnlyList<TimeZoneOption> _timeZoneOptions;
     private CountdownThresholds _thresholds;
     private string _searchText = string.Empty;
@@ -34,6 +35,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private bool _alwaysOnTop;
     private bool _launchAtStartup;
     private bool _hideOnCloseToTray;
+    private bool _showTitlesInNotifications;
     private bool _desktopLayerEnabled;
     private double _panelOpacity;
     private int _defaultReminderMinutesBefore;
@@ -48,6 +50,11 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private bool _started;
     private bool _disposed;
 
+    // The last archive, restore or delete, with the card as it was before it, while it can still
+    // be taken back (see Undo).
+    private PendingUndo? _pendingUndo;
+    private string _undoText = string.Empty;
+
     public MainWindowViewModel(AppState state, AppStateService stateService, IAutostartService autostartService)
     {
         _state = state;
@@ -57,6 +64,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _localization.SetLanguage(state.Settings.LanguageCode);
         _selectedLanguageCode = _localization.CurrentLanguageCode;
 
+        _reminderOptions = OptionCatalog.GetReminderOptions();
         _timeZoneOptions = OptionCatalog.GetTimeZoneOptions(_localization.CurrentLanguageCode);
 
         Countdowns = new ObservableCollection<CountdownItemViewModel>(
@@ -70,8 +78,11 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _panelOpacity = ClampOpacity(settings.PanelOpacity);
         _showArchivedOnly = settings.ShowArchivedOnly;
         _hideOnCloseToTray = settings.HideOnCloseToTray;
+        _showTitlesInNotifications = settings.ShowTitlesInNotifications;
         _launchAtStartup = SafeIsAutostartEnabled();
-        _defaultReminderMinutesBefore = ReminderLeadTime.Clamp(settings.DefaultReminderMinutesBefore);
+        _defaultReminderMinutesBefore = _reminderOptions.Any(option => option.Minutes == settings.DefaultReminderMinutesBefore)
+            ? settings.DefaultReminderMinutesBefore
+            : _reminderOptions[0].Minutes;
         _defaultTimeZoneId = _timeZoneOptions.Any(option => option.Id == settings.DefaultTimeZoneId)
             ? settings.DefaultTimeZoneId
             : TimeZoneInfo.Local.Id;
@@ -103,6 +114,12 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public ICollectionView ItemsView { get; }
 
     public AppSettings Settings => _state.Settings;
+
+    public IReadOnlyList<ReminderOption> ReminderOptions
+    {
+        get => _reminderOptions;
+        private set => SetProperty(ref _reminderOptions, value);
+    }
 
     public IReadOnlyList<TimeZoneOption> TimeZoneOptions
     {
@@ -232,6 +249,29 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// Whether reminders name the countdown. Off, a notification only says that a countdown needs
+    /// attention and how soon, so a title never reaches the lock screen, the notification history
+    /// or a shared screen.
+    /// </summary>
+    public bool ShowTitlesInNotifications
+    {
+        get => _showTitlesInNotifications;
+        set
+        {
+            if (!SetProperty(ref _showTitlesInNotifications, value))
+            {
+                return;
+            }
+
+            _state.Settings.ShowTitlesInNotifications = value;
+            RequestPersist();
+        }
+    }
+
+    /// <summary>The folder that holds the saved countdowns and settings.</summary>
+    public string DataDirectory => _stateService.StateDirectoryPath;
+
     public double PanelOpacity
     {
         get => _panelOpacity;
@@ -258,7 +298,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         get => _defaultReminderMinutesBefore;
         set
         {
-            if (value is < 0 or > ReminderLeadTime.MaxTotalMinutes ||
+            if (!ReminderOptions.Any(option => option.Minutes == value) ||
                 !SetProperty(ref _defaultReminderMinutesBefore, value))
             {
                 return;
@@ -394,6 +434,16 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     /// <summary>A short, non-blocking message the view should surface (for example a refused setting).</summary>
     public event EventHandler<string>? StatusMessageRequested;
 
+    /// <summary>True while the last archive, restore or delete can still be taken back with <see cref="Undo"/>.</summary>
+    public bool CanUndo => _pendingUndo is not null;
+
+    /// <summary>The undo notice ("Archived “Thesis”."); empty when there is nothing to undo.</summary>
+    public string UndoText
+    {
+        get => _undoText;
+        private set => SetProperty(ref _undoText, value);
+    }
+
     /// <summary>
     /// Starts the one-second clock and runs the first notification pass. Call after
     /// <see cref="NotificationRequested"/> has a listener.
@@ -424,6 +474,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public void UpsertCountdown(CountdownItem item)
     {
+        // Undo takes back the last action only; after an edit that is no longer the archive or
+        // delete the notice offers.
+        ClearPendingUndo();
         var now = DateTimeOffset.Now;
         item.Title = TextInput.Normalize(item.Title, TextInput.MaxTitleLength);
         item.Subtitle = TextInput.Normalize(item.Subtitle, TextInput.MaxNoteLength);
@@ -434,8 +487,6 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             var previous = existing.Model;
             item.IsArchived = previous.IsArchived;
             item.ArchivedAt = previous.ArchivedAt;
-            // Only active countdowns can be pinned.
-            item.IsPinned &= !item.IsArchived;
             if (previous.TargetAt == item.TargetAt && previous.ReminderMinutesBefore == item.ReminderMinutesBefore)
             {
                 // A wording change must not replay alerts that were already shown.
@@ -473,9 +524,14 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public void RemoveCountdown(CountdownItemViewModel item)
     {
-        Countdowns.Remove(item);
+        if (!Countdowns.Remove(item))
+        {
+            return;
+        }
+
         RefreshCountdowns(notify: false, reapplyFilter: false);
         RequestPersist();
+        SetPendingUndo(UndoableAction.Delete, item.ToModelCopy());
     }
 
     public void ArchiveCountdown(CountdownItemViewModel item)
@@ -485,17 +541,15 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // Pinning only orders active countdowns, so a filed one gives up its pin (and stays
-        // unpinned if it is restored).
+        var before = item.ToModelCopy();
         item.Model.IsArchived = true;
         item.Model.ArchivedAt = DateTimeOffset.Now;
-        item.Model.IsPinned = false;
         item.Model.ReminderShown = true;
         item.Model.DueShown = true;
         item.NotifyModelChanged();
-        SortCountdowns();
         RefreshCountdowns(notify: false);
         RequestPersist();
+        SetPendingUndo(UndoableAction.Archive, before);
     }
 
     public void RestoreCountdown(CountdownItemViewModel item)
@@ -505,6 +559,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        var before = item.ToModelCopy();
         item.Model.IsArchived = false;
         item.Model.ArchivedAt = null;
         // A restored item that is already past its deadline must not re-announce it.
@@ -512,16 +567,62 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         item.NotifyModelChanged();
         RefreshCountdowns(notify: false);
         RequestPersist();
+        SetPendingUndo(UndoableAction.Restore, before);
     }
 
-    /// <summary>Pins or unpins an active countdown; pinned countdowns sort ahead of the rest.</summary>
-    public void TogglePin(CountdownItemViewModel item)
+    /// <summary>
+    /// Takes back the last archive, restore or delete: the card returns exactly as it was, with its
+    /// filing date and the reminders already shown. Returns that card, or null when there was
+    /// nothing to undo. The view brings it into sight.
+    /// </summary>
+    public CountdownItemViewModel? Undo()
     {
-        if (item.Model.IsArchived)
+        if (_pendingUndo is not { } pending)
         {
-            return;
+            return null;
         }
 
+        ClearPendingUndo();
+        var before = pending.Before;
+        CountdownItemViewModel? card;
+        if (pending.Action == UndoableAction.Delete)
+        {
+            // Deleting made room, and adding a countdown clears the pending undo, so this never
+            // takes the list past MaxItems.
+            card = new CountdownItemViewModel(before);
+            Countdowns.Add(card);
+            SortCountdowns();
+        }
+        else
+        {
+            card = Countdowns.FirstOrDefault(vm => vm.Id == before.Id);
+            if (card is null)
+            {
+                return null;
+            }
+
+            card.Model.IsArchived = before.IsArchived;
+            card.Model.ArchivedAt = before.ArchivedAt;
+            card.Model.ReminderShown = before.ReminderShown;
+            card.Model.DueShown = before.DueShown;
+            card.NotifyModelChanged();
+        }
+
+        RefreshCountdowns(notify: false);
+        RequestPersist();
+        return card;
+    }
+
+    /// <summary>Lets the chance to undo lapse; the view calls this when the undo notice times out.</summary>
+    public void DismissUndo()
+    {
+        ClearPendingUndo();
+    }
+
+    /// <summary>Pins or unpins a countdown; pinned countdowns sort ahead of the rest.</summary>
+    public void TogglePin(CountdownItemViewModel item)
+    {
+        ClearPendingUndo();
         item.Model.IsPinned = !item.Model.IsPinned;
         item.NotifyModelChanged();
         SortCountdowns();
@@ -623,6 +724,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         var settings = _state.Settings;
         settings.AlwaysOnTop = _alwaysOnTop;
         settings.HideOnCloseToTray = _hideOnCloseToTray;
+        settings.ShowTitlesInNotifications = _showTitlesInNotifications;
         settings.DesktopLayerEnabled = _desktopLayerEnabled;
         settings.PanelOpacity = _panelOpacity;
         settings.ShowArchivedOnly = _showArchivedOnly;
@@ -698,23 +800,32 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             return null;
         }
 
+        // Without titles the notification is headed by the app's name and says only how soon.
         var title = Shorten(item.Title);
+        var heading = ShowTitlesInNotifications ? title : _localization["App.Name"];
         if (!item.ReminderShown &&
             item.ReminderMinutesBefore > 0 &&
             now < item.TargetAt &&
             item.TargetAt - now <= TimeSpan.FromMinutes(item.ReminderMinutesBefore))
         {
             item.ReminderShown = true;
+            var remaining = _localization.FormatDuration(item.TargetAt - now);
             return new CountdownNotificationEventArgs(
-                title,
-                _localization.Format("Notification.DueIn", title, _localization.FormatDuration(item.TargetAt - now)));
+                heading,
+                ShowTitlesInNotifications
+                    ? _localization.Format("Notification.DueIn", title, remaining)
+                    : _localization.Format("Notification.Private.DueIn", remaining));
         }
 
         if (!item.DueShown && now >= item.TargetAt)
         {
             item.DueShown = true;
             item.ReminderShown = true;
-            return new CountdownNotificationEventArgs(title, _localization.Format("Notification.Reached", title));
+            return new CountdownNotificationEventArgs(
+                heading,
+                ShowTitlesInNotifications
+                    ? _localization.Format("Notification.Reached", title)
+                    : _localization["Notification.Private.Reached"]);
         }
 
         return null;
@@ -735,6 +846,43 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             new CountdownNotificationEventArgs(
                 _localization.Format("Notification.Summary", pending.Count),
                 string.Join(Environment.NewLine, pending.Select(static n => n.Message))));
+    }
+
+    private void SetPendingUndo(UndoableAction action, CountdownItem before)
+    {
+        _pendingUndo = new PendingUndo(action, before);
+        // The text first, then the visibility: the view announces the notice once, when it appears
+        // or when a new action replaces the one it showed.
+        UndoText = BuildUndoText();
+        OnPropertyChanged(nameof(CanUndo));
+    }
+
+    private void ClearPendingUndo()
+    {
+        if (_pendingUndo is null)
+        {
+            return;
+        }
+
+        _pendingUndo = null;
+        OnPropertyChanged(nameof(CanUndo));
+        UndoText = string.Empty;
+    }
+
+    private string BuildUndoText()
+    {
+        if (_pendingUndo is not { } pending)
+        {
+            return string.Empty;
+        }
+
+        var key = pending.Action switch
+        {
+            UndoableAction.Archive => "Main.Undo.Archived",
+            UndoableAction.Restore => "Main.Undo.Restored",
+            _ => "Main.Undo.Deleted"
+        };
+        return _localization.Format(key, Shorten(pending.Before.Title));
     }
 
     private static void ResetNotificationFlags(CountdownItem item, DateTimeOffset now)
@@ -812,15 +960,18 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        ReminderOptions = OptionCatalog.GetReminderOptions();
         TimeZoneOptions = OptionCatalog.GetTimeZoneOptions(_localization.CurrentLanguageCode);
-        // The combo box loses its selection when its item list is replaced. The setter ignores
-        // the null the combo box pushes meanwhile (views should not write it back either), and
-        // re-raising the unchanged value makes it select the matching new entry.
+        // The combo boxes lose their selection when their item lists are replaced. The setters
+        // ignore the null a combo box pushes meanwhile (views should not write it back either),
+        // and re-raising the unchanged values makes them select the matching new entries.
+        OnPropertyChanged(nameof(DefaultReminderMinutesBefore));
         OnPropertyChanged(nameof(DefaultTimeZoneId));
         OnPropertyChanged(nameof(ArchiveToggleText));
         OnPropertyChanged(nameof(CloseButtonText));
         OnPropertyChanged(nameof(PerilousThresholdText));
         OnPropertyChanged(nameof(UrgentThresholdText));
+        UndoText = BuildUndoText();
         RefreshCountdowns(notify: false, reapplyFilter: false);
     }
 
@@ -875,4 +1026,14 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     {
         return double.IsFinite(value) ? Math.Clamp(value, MinPanelOpacity, MaxPanelOpacity) : MaxPanelOpacity;
     }
+
+    private enum UndoableAction
+    {
+        Archive,
+        Restore,
+        Delete
+    }
+
+    /// <param name="Before">A copy of the card taken just before the action.</param>
+    private sealed record PendingUndo(UndoableAction Action, CountdownItem Before);
 }
