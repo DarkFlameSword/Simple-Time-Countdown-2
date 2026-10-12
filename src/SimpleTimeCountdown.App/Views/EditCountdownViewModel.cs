@@ -453,7 +453,7 @@ public sealed class EditCountdownViewModel : ObservableObject, INotifyDataErrorI
     }
 
     private FormValues CurrentValues() =>
-        new(_title, _note, _date, _hour, _minute, _timeZone?.Id, _reminder?.Minutes, _isPinned);
+        new(_title, _note, _date, _hour, _minute, _timeZone?.Id, Reminder.TotalMinutes, _isPinned);
 
     private void Revalidate()
     {

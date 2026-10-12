@@ -11,6 +11,7 @@ using System.Windows.Threading;
 using TimeCountdown.Controls;
 using TimeCountdown.Models;
 using TimeCountdown.Services;
+using TimeCountdown.ViewModels;
 using Control = System.Windows.Controls.Control;
 using DataFormats = System.Windows.DataFormats;
 using DataObject = System.Windows.DataObject;
@@ -18,6 +19,7 @@ using KeyEventArgs = System.Windows.Input.KeyEventArgs;
 using KeyEventHandler = System.Windows.Input.KeyEventHandler;
 using Point = System.Windows.Point;
 using Screen = System.Windows.Forms.Screen;
+using TextBox = System.Windows.Controls.TextBox;
 
 namespace TimeCountdown.Views;
 
@@ -196,7 +198,7 @@ public partial class EditCountdownWindow : Window
             EditorField.Date => ((Control)DueDatePicker, DateErrorText),
             EditorField.Time => (HourComboBox, TimeErrorText),
             EditorField.TimeZone => (TimeZoneComboBox, TimeZoneErrorText),
-            EditorField.Reminder => (ReminderComboBox, ReminderErrorText),
+            EditorField.Reminder => (FirstInvalidReminderField(), ReminderErrorText),
             _ => (TitleTextBox, TitleErrorText)
         };
 
@@ -204,6 +206,13 @@ public partial class EditCountdownWindow : Window
         input.BringIntoView();
         Announce(message);
     }
+
+    private TextBox FirstInvalidReminderField() => _viewModel.Reminder.FirstInvalidPart switch
+    {
+        ReminderPart.Hours => ReminderHoursTextBox,
+        ReminderPart.Minutes => ReminderMinutesTextBox,
+        _ => ReminderDaysTextBox
+    };
 
     // The note appears while the user is working in another field (a repeated fall-back time, a
     // time that has passed), and the counters are only visual; announce each once when it appears, and
