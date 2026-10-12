@@ -337,15 +337,19 @@
                     <TextBlock Style="{StaticResource Text.Caption}"
                                Margin="24,4,0,0"
                                Text="{Binding [Settings.Privacy.NotificationTitlesHint], Source={StaticResource Loc}}" />
-                    <WrapPanel Margin="-6,12,0,0">
-                        <Button Style="{StaticResource Button.Link}"
-                                Margin="0,0,12,0"
-                                Click="OpenDataFolder_Click"
-                                Content="{Binding [Settings.Privacy.OpenData], Source={StaticResource Loc}}" />
-                        <Button Style="{StaticResource Button.Link}"
-                                Click="OpenLogs_Click"
-                                Content="{Binding [Settings.Privacy.OpenLogs], Source={StaticResource Loc}}" />
-                    </WrapPanel>
+                    <!-- One folder per line, each link left-aligned like Reset panel position (pulled
+                         left by its padding so the text lines up with the labels); the log caption
+                         sits under the log link it explains. -->
+                    <Button Style="{StaticResource Button.Link}"
+                            Margin="-6,12,0,0"
+                            HorizontalAlignment="Left"
+                            Click="OpenDataFolder_Click"
+                            Content="{Binding [Settings.Privacy.OpenData], Source={StaticResource Loc}}" />
+                    <Button Style="{StaticResource Button.Link}"
+                            Margin="-6,4,0,0"
+                            HorizontalAlignment="Left"
+                            Click="OpenLogs_Click"
+                            Content="{Binding [Settings.Privacy.OpenLogs], Source={StaticResource Loc}}" />
                     <TextBlock Style="{StaticResource Text.Caption}"
                                Margin="0,4,0,0"
                                Text="{Binding [Settings.Privacy.LogsHint], Source={StaticResource Loc}}" />
